@@ -15,7 +15,7 @@ npx @badlogic/pi
 
 ## What This Is
 
-A simple CLI tool that manages vLLM deployments on Prime Intellect GPU pods, exposing OpenAI-compatible endpoints, e.g. for experimentation, for your local coding agents (Cursor, Aider, Continue, etc), etc.
+A simple CLI tool that manages vLLM deployments on Prime Intellect GPU pods, exposing OpenAI-compatible endpoints, e.g. for experimentation, for your local coding agents (Cursor, Aider, Continue, etc), etc. Faster setup and inference compared to running models locally with Ollama.
 
 **Key Features:**
 - Run multiple open-weight models concurrently on a single GPU
@@ -105,7 +105,7 @@ export OPENAI_API_KEY='dummy'
 ### Context Window vs Output Tokens
 The `context` parameter sets the **total** token budget for input + output combined:
 - Starting a model with `context=8k` means 8,192 tokens total
-- If your prompt uses 6,000 tokens, you have 2,192 tokens left for the response  
+- If your prompt uses 6,000 tokens, you have 2,192 tokens left for the response
 - Each API request can specify `max_tokens` to control output length within this budget
 
 Example:
@@ -115,7 +115,7 @@ Example:
 
 # When calling the API, you control output length per request:
 # - Send 20k token prompt
-# - Request max_tokens=4000 
+# - Request max_tokens=4000
 # - Total = 24k (fits within 32k context)
 ```
 

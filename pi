@@ -355,8 +355,8 @@ class PrimeIntellectCLI {
             process.exit(1);
         }
 
-        // Show existing logs then tail -f
-        await this.ssh(`cat ${logFile} && tail -f ${logFile}`, true);
+        // Use tail -f with line count to show recent logs without duplication
+        await this.ssh(`tail -n 50 -f ${logFile}`, true);
     }
 
     shell() {

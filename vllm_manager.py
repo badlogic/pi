@@ -187,8 +187,11 @@ class VLLMManager:
                 f.write(f"CUDA_VISIBLE_DEVICES: {gpu_ids}\n")
             if tensor_parallel_size > 1:
                 f.write(f"Tensor Parallel Size: {tensor_parallel_size}\n")
-            f.write(f"HF_TOKEN: {env.get('HF_TOKEN', 'NOT SET')}\n")
-            f.write(f"HUGGING_FACE_HUB_TOKEN: {env.get('HUGGING_FACE_HUB_TOKEN', 'NOT SET')}\n")
+            # Never log tokens for security
+            hf_token_status = "SET" if env.get('HF_TOKEN') else "NOT SET"
+            hf_hub_token_status = "SET" if env.get('HUGGING_FACE_HUB_TOKEN') else "NOT SET"
+            f.write(f"HF_TOKEN: {hf_token_status}\n")
+            f.write(f"HUGGING_FACE_HUB_TOKEN: {hf_hub_token_status}\n")
             f.write("=" * 60 + "\n\n")
             f.flush()
             
