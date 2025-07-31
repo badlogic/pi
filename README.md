@@ -22,7 +22,7 @@ A simple CLI tool that automatically sets up and manages vLLM deployments on GPU
 - **Multi-model management** - Run multiple models concurrently on a single pod
 - **Smart GPU allocation** - Round robin assigns models to available GPUs on multi-GPU pods
 - **Tensor parallelism** - Run large models across multiple GPUs with `--all-gpus`
-- **OpenAI-compatible API** - Drop-in replacement for OpenAI API clients
+- **OpenAI-compatible API** - Drop-in replacement for OpenAI API clients with automatic tool/function calling support
 - **No complex setup** - Just SSH access, no Kubernetes or Docker required
 - **Privacy first** - vLLM telemetry disabled by default
 

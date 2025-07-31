@@ -128,7 +128,9 @@ class VLLMManager:
             "--host", "0.0.0.0",
             "--port", str(port),
             "--max-model-len", str(max_len),
-            "--gpu-memory-utilization", str(gpu_memory_utilization)
+            "--gpu-memory-utilization", str(gpu_memory_utilization),
+            "--enable-auto-tool-choice",
+            "--tool-call-parser", "hermes"
         ]
         
         # Add tensor parallel size if > 1
