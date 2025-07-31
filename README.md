@@ -1,6 +1,6 @@
-# Prime Intellect GPU Pod Manager
+# GPU Pod Manager
 
-Deploy LLMs on Prime Intellect GPU pods for local coding agents and AI assistants.
+Quickly deploy LLMs on GPU pods from [Prime Intellect](https://www.primeintellect.ai/), [Vast.ai](https://vast.ai/), AWS, etc., for local coding agents and AI assistants.
 
 ## Installation
 
@@ -15,20 +15,25 @@ npx @badlogic/pi
 
 ## What This Is
 
-A simple CLI tool that automatically sets up and manages vLLM deployments on Prime Intellect GPU pods. Start from a clean Ubuntu pod and have multiple models running in minutes.
+A simple CLI tool that automatically sets up and manages vLLM deployments on GPU pods. Start from a clean Ubuntu pod and have multiple models running in minutes. A GPU pod is defined as an Ubuntu machine with root access, one or more GPUs, and Cuda drivers installed. It is aimed at individuals who are limited by local hardware and want to experiment with large open weight LLMs for their coding assistent workflows.
 
 **Key Features:**
 - **Zero to LLM in minutes** - Automatically installs vLLM and all dependencies on clean pods
 - **Multi-model management** - Run multiple models concurrently on a single pod
-- **Smart GPU allocation** - Automatically assigns models to available GPUs on multi-GPU pods
+- **Smart GPU allocation** - Round robin assigns models to available GPUs on multi-GPU pods
 - **Tensor parallelism** - Run large models across multiple GPUs with `--all-gpus`
 - **OpenAI-compatible API** - Drop-in replacement for OpenAI API clients
 - **No complex setup** - Just SSH access, no Kubernetes or Docker required
+- **Privacy first** - vLLM telemetry disabled by default
 
 **Limitations:**
-- OpenAI endpoints exposed to the public internet
-- Requires manual pod creation via Prime Intellect
+- OpenAI endpoints exposed to the public internet (yolo)
+- Requires manual pod creation via Prime Intellect, Vast.ai, AWS, etc.
 - Assumes Ubuntu 22 image when creating pods
+
+## What this is not
+- A provisioning manager for pods. You need to provision the pods on the respective provider themselves.
+- Super optimized LLM deployment infrastructure for absolute best performance. This is for individuals who want to quickly spin up large open weights models for local LLM loads.
 
 ## Requirements
 
@@ -44,11 +49,13 @@ A simple CLI tool that automatically sets up and manages vLLM deployments on Pri
 
 ```bash
 # 1. Get a GPU pod from Prime Intellect
-# Visit https://app.primeintellect.ai and create a pod (use Ubuntu 22 image)
+#    Visit https://app.primeintellect.ai or https://vast.ai/ and create a pod (use Ubuntu 22 image)
+#    Providers usually give you an SSH command with which to log into the machine. Copy that command.
 
-# 2. Setup the tool (this installs vLLM and all dependencies automatically!)
+# 2. On your local machine, run the following to setup the remote pod. The Hugging Face token
+#    is required for model download.
 export HF_TOKEN=your_huggingface_token
-pi setup prod "ssh root@135.181.71.41 -p 22"
+pi setup my-pod-name "ssh root@135.181.71.41 -p 22"
 
 # 3. Start a model (automatically manages GPU assignment)
 pi start microsoft/Phi-3-mini-4k-instruct --name phi3 --context 4k --memory 20%
@@ -58,7 +65,7 @@ pi prompt phi3 "What is 2+2?"
 # Response: The answer is 4.
 
 # 5. Start another model (automatically uses next available GPU on multi-GPU pods)
-pi start Qwen/Qwen2.5-7B-Instruct --name qwen --memory 30%
+pi start Qwen/Qwen2.5-7B-Instruct --name qwen --context 128k --memory 30%
 
 # 6. Check running models
 pi list
@@ -76,10 +83,10 @@ export OPENAI_API_KEY='dummy'
    - Configures HuggingFace tokens
    - Sets up the model manager
 
-2. **Smart Model Management**: Each `pi start` command:
+2. **Model Management**: Each `pi start` command:
    - Automatically finds an available GPU (on multi-GPU systems)
    - Allocates the specified memory fraction
-   - Starts a separate vLLM instance on a unique port
+   - Starts a separate vLLM instance on a unique port accessible via the OpenAI API protocol
    - Manages logs and process lifecycle
 
 3. **Multi-GPU Support**: On pods with multiple GPUs:
@@ -114,7 +121,7 @@ pi start <model> [options]           # Start a model with options
   --context <size>                   # Context window: 4k, 8k, 16k, 32k (default: 8k)
   --memory <percent>                 # GPU memory: 30%, 50%, 90% (default: 90%)
   --all-gpus                         # Use tensor parallelism across all GPUs
-pi stop <name>                       # Stop a model
+pi stop [name]                       # Stop a model (or all if no name)
 pi logs <name>                       # View logs with tail -f
 pi prompt <name> "message"           # Quick test prompt
 ```
@@ -123,25 +130,27 @@ pi prompt <name> "message"           # Quick test prompt
 
 ### Search for models
 ```bash
-./pi search codellama
-./pi search deepseek
-./pi search qwen
+pi search codellama
+pi search deepseek
+pi search qwen
 ```
+
+**Note**: vLLM does not support formats like GGUF. Read the [docs](https://docs.vllm.ai/en/latest/)
 
 ### A100 80GB scenarios
 ```bash
 # Small model, high concurrency (~30-50 concurrent requests)
-./pi start microsoft/Phi-3-mini-4k-instruct phi3 4096 0.3
+pi start microsoft/Phi-3-mini-4k-instruct --name phi3 --context 4k --memory 30%
 
 # Medium model, balanced (~10-20 concurrent requests)
-./pi start meta-llama/Llama-3.1-8B-Instruct llama8b 8192 0.5
+pi start meta-llama/Llama-3.1-8B-Instruct --name llama8b --context 8k --memory 50%
 
 # Large model, limited concurrency (~5-10 concurrent requests)
-./pi start meta-llama/Llama-3.1-70B-Instruct llama70b 4096 0.9
+pi start meta-llama/Llama-3.1-70B-Instruct --name llama70b --context 4k --memory 90%
 
 # Run multiple small models
-./pi start Qwen/Qwen2.5-Coder-1.5B coder1 8192 0.15
-./pi start microsoft/Phi-3-mini-4k-instruct phi3 4096 0.15
+pi start Qwen/Qwen2.5-Coder-1.5B --name coder1 --context 8k --memory 15%
+pi start microsoft/Phi-3-mini-4k-instruct --name phi3 --context 4k --memory 15%
 ```
 
 ## Understanding Context and Memory
@@ -150,12 +159,12 @@ pi prompt <name> "message"           # Quick test prompt
 The `context` parameter sets the **total** token budget for input + output combined:
 - Starting a model with `context=8k` means 8,192 tokens total
 - If your prompt uses 6,000 tokens, you have 2,192 tokens left for the response
-- Each API request can specify `max_tokens` to control output length within this budget
+- Each OpenAI API request to the model can specify `max_output_tokens` to control output length within this budget
 
 Example:
 ```bash
 # Start model with 32k total context
-./pi start meta-llama/Llama-3.1-8B llama 32k 0.5
+pi start meta-llama/Llama-3.1-8B --name llama --context 32k --memory 50%
 
 # When calling the API, you control output length per request:
 # - Send 20k token prompt
@@ -180,24 +189,24 @@ For pods with multiple GPUs, the tool automatically manages GPU assignment:
 ### Automatic GPU assignment for multiple models
 ```bash
 # Each model automatically uses the next available GPU
-./pi start microsoft/Phi-3-mini-4k-instruct --memory 20%  # Auto-assigns to GPU 0
-./pi start Qwen/Qwen2.5-7B-Instruct --memory 20%         # Auto-assigns to GPU 1
-./pi start meta-llama/Llama-3.1-8B --memory 20%          # Auto-assigns to GPU 2
+pi start microsoft/Phi-3-mini-4k-instruct --memory 20%  # Auto-assigns to GPU 0
+pi start Qwen/Qwen2.5-7B-Instruct --memory 20%         # Auto-assigns to GPU 1
+pi start meta-llama/Llama-3.1-8B --memory 20%          # Auto-assigns to GPU 2
 
 # Check which GPU each model is using
-./pi list
+pi list
 ```
 
 ### Run large models across all GPUs
 ```bash
 # Use --all-gpus for tensor parallelism across all available GPUs
-./pi start meta-llama/Llama-3.1-70B-Instruct --all-gpus
-./pi start Qwen/Qwen2.5-72B-Instruct --all-gpus --context 64k
+pi start meta-llama/Llama-3.1-70B-Instruct --all-gpus
+pi start Qwen/Qwen2.5-72B-Instruct --all-gpus --context 64k
 ```
 
 ### Check GPU usage
 ```bash
-./pi ssh "nvidia-smi"
+pi ssh "nvidia-smi"
 ```
 
 ## Architecture Notes

@@ -114,7 +114,7 @@ class PrimeIntellectCLI {
         if (sshCommand.toLowerCase().startsWith('ssh ')) {
             sshCommand = sshCommand.substring(4);
         }
-        
+
         // Save pod config
         if (!this.config.pods) {
             this.config.pods = {};
@@ -150,7 +150,7 @@ class PrimeIntellectCLI {
         await this.ssh(`HF_TOKEN="${hfToken}" bash pod_setup.sh`, true);
 
         console.log('\n✓ Setup complete!');
-        
+
         // Show usage help
         this.showHelp();
     }
@@ -162,29 +162,29 @@ class PrimeIntellectCLI {
 
     parseContextSize(value) {
         if (!value) return 8192;
-        
+
         // Convert string to lowercase for case-insensitive matching
         const lower = value.toString().toLowerCase();
-        
+
         // Handle 'k' suffix (4k, 8k, 32k, etc)
         if (lower.endsWith('k')) {
             return parseInt(lower.slice(0, -1)) * 1024;
         }
-        
+
         // Handle plain numbers
         return parseInt(value);
     }
 
     parseMemory(value) {
         if (!value) return 0.9;
-        
+
         const str = value.toString().toLowerCase();
-        
+
         // Handle percentage (30%, 50%, etc)
         if (str.endsWith('%')) {
             return parseInt(str.slice(0, -1)) / 100;
         }
-        
+
         // Handle decimal (0.3, 0.5, etc)
         const num = parseFloat(str);
         if (num > 1) {
@@ -241,13 +241,13 @@ class PrimeIntellectCLI {
 
         // Check for multi-GPU setup
         const gpuCount = await this.getGpuCount();
-        
+
         if (allGpus) {
             if (memory !== 0.9) {
                 console.log('Warning: --memory ignored with --all-gpus (using 100% memory across all GPUs)');
             }
             memory = 1.0;
-            
+
             if (gpuCount === 1) {
                 console.log('Note: --all-gpus specified but only 1 GPU found');
                 allGpus = false;
@@ -283,6 +283,16 @@ class PrimeIntellectCLI {
     }
 
     async start(modelId, name, maxLen = '8192', gpuMemory, options = {}) {
+        // Check if name is already in use locally first
+        if (name) {
+            const runningModels = this.getRunningModels();
+            if (runningModels[name]) {
+                console.error(`Error: Model name '${name}' is already in use`);
+                console.error('Running models:', Object.keys(runningModels).join(', '));
+                process.exit(1);
+            }
+        }
+
         // Build args for vllm_manager.py
         let args = modelId;
 
@@ -306,25 +316,72 @@ class PrimeIntellectCLI {
         }
 
         const output = this.ssh(`${envPrefix}python3 vllm_manager.py start ${args}`);
-        console.log(output);
-
-        // Extract model name from output
-        const match = output.match(/Started (\S+)/);
-        if (match) {
-            const modelName = match[1];
-            console.log('\nShowing logs (press Ctrl+C to stop)...\n');
+        
+        // Extract model name and connection info from output
+        const nameMatch = output.match(/Started (\S+)/);
+        const urlMatch = output.match(/URL: (http:\/\/[^\s]+)/);
+        const exportMatch = output.match(/export OPENAI_BASE_URL='([^']+)'/);
+        
+        if (nameMatch) {
+            const modelName = nameMatch[1];
+            const url = urlMatch ? urlMatch[1] : null;
+            const exportCmd = exportMatch ? `export OPENAI_BASE_URL='${exportMatch[1]}'` : null;
+            
+            console.log(`\nStarted ${modelName}`);
+            console.log('Waiting for model to initialize...\n');
+            
+            // Set up Ctrl+C handler for manual interruption
+            const showModelInfo = () => {
+                console.log('\n\n' + '='.repeat(60));
+                console.log('Model Information:');
+                console.log('='.repeat(60));
+                console.log(`Name: ${modelName}`);
+                if (url) console.log(`URL: ${url}`);
+                if (exportCmd) {
+                    console.log(`\nTo use with OpenAI clients:`);
+                    console.log(exportCmd);
+                    console.log(`export OPENAI_API_KEY='dummy'`);
+                }
+                console.log('='.repeat(60));
+            };
+            
+            process.on('SIGINT', () => {
+                showModelInfo();
+                process.exit(0);
+            });
+            
+            // Watch logs until startup complete
             await this.logs(modelName);
+            
+            // Show model info after automatic exit
+            showModelInfo();
+        } else {
+            console.log(output);
         }
     }
 
     stop(name) {
         if (!name) {
-            console.error('Usage: pi stop <name>');
-            process.exit(1);
+            // Stop all models
+            const runningModels = this.getRunningModels();
+            const modelNames = Object.keys(runningModels);
+            
+            if (modelNames.length === 0) {
+                console.log('No models running');
+                return;
+            }
+            
+            console.log(`Stopping ${modelNames.length} model(s): ${modelNames.join(', ')}`);
+            
+            for (const modelName of modelNames) {
+                const output = this.ssh(`python3 vllm_manager.py stop ${modelName}`);
+                console.log(output);
+            }
+        } else {
+            // Stop specific model
+            const output = this.ssh(`python3 vllm_manager.py stop ${name}`);
+            console.log(output);
         }
-
-        const output = this.ssh(`python3 vllm_manager.py stop ${name}`);
-        console.log(output);
     }
 
     async logs(name) {
@@ -355,8 +412,43 @@ class PrimeIntellectCLI {
             process.exit(1);
         }
 
-        // Use tail -f with line count to show recent logs without duplication
-        await this.ssh(`tail -n 50 -f ${logFile}`, true);
+        // Use a custom tail that watches for startup complete
+        const pod = this.getActivePod();
+        const sshCmd = `ssh ${pod.ssh} tail -n 50 -f ${logFile}`;
+        
+        return new Promise((resolve) => {
+            const [cmd, ...args] = sshCmd.split(' ');
+            const proc = spawn(cmd, args, { stdio: ['inherit', 'pipe', 'pipe'] });
+            
+            let buffer = '';
+            
+            proc.stdout.on('data', (data) => {
+                process.stdout.write(data);
+                buffer += data.toString();
+                
+                // Check for vLLM startup complete message
+                if (buffer.includes('Application startup complete.') || 
+                    buffer.includes('Uvicorn running on')) {
+                    setTimeout(() => {
+                        proc.kill();
+                        resolve();
+                    }, 500); // Small delay to ensure final messages are shown
+                }
+                
+                // Keep buffer size manageable
+                if (buffer.length > 10000) {
+                    buffer = buffer.slice(-5000);
+                }
+            });
+            
+            proc.stderr.on('data', (data) => {
+                process.stderr.write(data);
+            });
+            
+            proc.on('close', () => {
+                resolve();
+            });
+        });
     }
 
     shell() {
@@ -371,7 +463,7 @@ class PrimeIntellectCLI {
         }
 
         console.log('Configured pods:\n');
-        
+
         // Show active pod first
         if (this.config.active && this.config.pods[this.config.active]) {
             console.log(`● ${this.config.active} (active)`);
@@ -407,13 +499,13 @@ class PrimeIntellectCLI {
         }
 
         delete this.config.pods[podName];
-        
+
         // If we removed the active pod, clear it or switch to another
         if (this.config.active === podName) {
             const remainingPods = Object.keys(this.config.pods);
             this.config.active = remainingPods.length > 0 ? remainingPods[0] : null;
         }
-        
+
         this.saveConfig();
         console.log(`Removed pod: ${podName}`);
         if (this.config.active) {
@@ -461,7 +553,7 @@ class PrimeIntellectCLI {
                 console.log(`  pi start ${model.modelId}`);
                 console.log();
             }
-            
+
             // Add HuggingFace search URL
             console.log(`\nView more models on HuggingFace:`);
             console.log(`\x1b[36mhttps://huggingface.co/models?search=${encodeURIComponent(query)}&sort=downloads&pipeline_tag=text-generation\x1b[0m`);
@@ -515,7 +607,7 @@ class PrimeIntellectCLI {
 
     showHelp() {
         console.log('\nPrime Intellect CLI\n');
-        
+
         console.log('Pod Management:');
         console.log('  pi setup <pod-name> <ssh_command>  Configure and activate a pod');
         console.log('  pi pods                            List all pods (active pod marked)');
@@ -525,7 +617,7 @@ class PrimeIntellectCLI {
         console.log('  pi list                            List running models');
         console.log('  pi search <query>                  Search HuggingFace models');
         console.log('  pi start <model> [options]         Start a model');
-        console.log('  pi stop <name>                     Stop a model');
+        console.log('  pi stop [name]                     Stop a model (or all if no name)');
         console.log('  pi logs <name>                     View model logs');
         console.log('  pi prompt <name> <msg>             Chat with a model\n');
         console.log('Start Options:');
@@ -535,7 +627,7 @@ class PrimeIntellectCLI {
         console.log('  --all-gpus         Use all GPUs with tensor parallelism\n');
         console.log('Utility:');
         console.log('  pi shell                           SSH into active pod');
-        
+
         console.log('\nQuick Example:');
         console.log('  pi start microsoft/Phi-3-mini-4k-instruct --name phi3 --memory 30%');
         console.log('  pi prompt phi3 "What is 2+2?"');
@@ -580,7 +672,7 @@ class PrimeIntellectCLI {
         const [,, command, ...args] = process.argv;
 
         switch (command) {
-            case 'setup':
+            case 'setup': {
                 if (args.length < 2) {
                     console.error('Usage: pi setup <pod-name> <ssh_command>');
                     console.error('Example: pi setup prod "root@135.181.71.41 -p 22"');
@@ -590,7 +682,7 @@ class PrimeIntellectCLI {
                 const sshCmd = args.slice(1).join(' ');
                 this.setup(podName, sshCmd);
                 break;
-
+            }
             case 'pods':
                 this.listPods();
                 break;
@@ -634,7 +726,7 @@ class PrimeIntellectCLI {
                 await this.logs(args[0]);
                 break;
 
-            case 'prompt':
+            case 'prompt': {
                 if (args.length < 2) {
                     console.error('Usage: pi prompt <model_name> "<message>"');
                     console.error('Example: pi prompt phi3 "Hey, how you going"');
@@ -644,7 +736,7 @@ class PrimeIntellectCLI {
                 const message = args.slice(1).join(' ');
                 this.prompt(modelName, message);
                 break;
-
+            }
             case 'shell':
                 this.shell();
                 break;

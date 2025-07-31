@@ -34,9 +34,21 @@ else
     echo "HF tokens already in ~/.bashrc"
 fi
 
+# Add vLLM telemetry opt-out to bashrc
+if ! grep -q "VLLM_NO_USAGE_STATS" ~/.bashrc 2>/dev/null; then
+    echo "" >> ~/.bashrc
+    echo "# Disable vLLM telemetry" >> ~/.bashrc
+    echo "export VLLM_NO_USAGE_STATS=1" >> ~/.bashrc
+    echo "Added vLLM telemetry opt-out to ~/.bashrc"
+fi
+
 # Export for current session
 export HF_TOKEN="$HF_TOKEN"
 export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
+
+# Disable vLLM telemetry
+export VLLM_NO_USAGE_STATS=1
+mkdir -p ~/.config/vllm && touch ~/.config/vllm/do_not_track
 
 # Copy manager script
 echo "Setup complete!"

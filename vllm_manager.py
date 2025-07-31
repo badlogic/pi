@@ -138,6 +138,9 @@ class VLLMManager:
         # Get environment with correct HF token
         env = os.environ.copy()
         
+        # Disable vLLM telemetry
+        env['VLLM_NO_USAGE_STATS'] = '1'
+        
         # Handle GPU assignment
         assigned_gpu = None
         if tensor_parallel_size > 1:
@@ -276,6 +279,7 @@ def main():
             for name, info in models.items():
                 print(f"\n{name}:")
                 print(f"  Model: {info['model_id']}")
+                print(f"  HF:    https://huggingface.co/{info['model_id']}")
                 print(f"  Port:  {info['port']}")
                 if 'tensor_parallel_size' in info and info.get('tensor_parallel_size', 1) > 1:
                     print(f"  GPUs:  {info.get('tensor_parallel_size', 1)} (tensor parallel)")
