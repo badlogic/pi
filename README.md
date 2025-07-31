@@ -1,6 +1,6 @@
 # GPU Pod Manager
 
-Quickly deploy LLMs on GPU pods from [Prime Intellect](https://www.primeintellect.ai/), [Vast.ai](https://vast.ai/), AWS, etc., for local coding agents and AI assistants.
+Quickly deploy LLMs on GPU pods from [Prime Intellect](https://www.primeintellect.ai/), [Vast.ai](https://vast.ai/), [DataCrunch](datacrunch.io), AWS, etc., for local coding agents and AI assistants.
 
 ## Installation
 
@@ -37,19 +37,20 @@ A simple CLI tool that automatically sets up and manages vLLM deployments on GPU
 
 ## Requirements
 
-- **Node.js 14+** - To run the CLI tool
+- **Node.js 14+** - To run the CLI tool on your machine
 - **HuggingFace Token** - Required for downloading models (get one at https://huggingface.co/settings/tokens)
 - **Prime Intellect Account** - Sign up at https://app.primeintellect.ai
 - **GPU Pod** - At least one running pod with:
-  - Ubuntu 22 image (selected when creating pod)
+  - Ubuntu 22+ image (selected when creating pod)
   - SSH access enabled
   - Clean state (no manual vLLM installation needed)
+  - **Note**: B200 GPUs require PyTorch nightly with CUDA 12.8+ (automatically installed if detected). However, vLLM may need to be built from source for full compatibility.
 
 ## Quick Start
 
 ```bash
 # 1. Get a GPU pod from Prime Intellect
-#    Visit https://app.primeintellect.ai or https://vast.ai/ and create a pod (use Ubuntu 22 image)
+#    Visit https://app.primeintellect.ai or https://vast.ai/ or https://datacrunch.io and create a pod (use Ubuntu 22+ image)
 #    Providers usually give you an SSH command with which to log into the machine. Copy that command.
 
 # 2. On your local machine, run the following to setup the remote pod. The Hugging Face token
@@ -58,14 +59,14 @@ export HF_TOKEN=your_huggingface_token
 pi setup my-pod-name "ssh root@135.181.71.41 -p 22"
 
 # 3. Start a model (automatically manages GPU assignment)
-pi start microsoft/Phi-3-mini-4k-instruct --name phi3 --context 4k --memory 20%
+pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 20%
 
 # 4. Test the model with a prompt
 pi prompt phi3 "What is 2+2?"
 # Response: The answer is 4.
 
 # 5. Start another model (automatically uses next available GPU on multi-GPU pods)
-pi start Qwen/Qwen2.5-7B-Instruct --name qwen --context 128k --memory 30%
+pi start Qwen/Qwen2.5-7B-Instruct --name qwen --memory 30%
 
 # 6. Check running models
 pi list
@@ -118,9 +119,10 @@ pi list                              # List running models on active pod
 pi search <query>                    # Search HuggingFace models
 pi start <model> [options]           # Start a model with options
   --name <name>                      # Short alias (default: auto-generated)
-  --context <size>                   # Context window: 4k, 8k, 16k, 32k (default: 8k)
+  --context <size>                   # Context window: 4k, 8k, 16k, 32k (default: model default)
   --memory <percent>                 # GPU memory: 30%, 50%, 90% (default: 90%)
   --all-gpus                         # Use tensor parallelism across all GPUs
+  --vllm-args                        # Pass all remaining args directly to vLLM
 pi stop [name]                       # Stop a model (or all if no name)
 pi logs <name>                       # View logs with tail -f
 pi prompt <name> "message"           # Quick test prompt
@@ -140,17 +142,17 @@ pi search qwen
 ### A100 80GB scenarios
 ```bash
 # Small model, high concurrency (~30-50 concurrent requests)
-pi start microsoft/Phi-3-mini-4k-instruct --name phi3 --context 4k --memory 30%
+pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 30%
 
 # Medium model, balanced (~10-20 concurrent requests)
-pi start meta-llama/Llama-3.1-8B-Instruct --name llama8b --context 8k --memory 50%
+pi start meta-llama/Llama-3.1-8B-Instruct --name llama8b --memory 50%
 
 # Large model, limited concurrency (~5-10 concurrent requests)
-pi start meta-llama/Llama-3.1-70B-Instruct --name llama70b --context 4k --memory 90%
+pi start meta-llama/Llama-3.1-70B-Instruct --name llama70b --memory 90%
 
 # Run multiple small models
-pi start Qwen/Qwen2.5-Coder-1.5B --name coder1 --context 8k --memory 15%
-pi start microsoft/Phi-3-mini-4k-instruct --name phi3 --context 4k --memory 15%
+pi start Qwen/Qwen2.5-Coder-1.5B --name coder1 --memory 15%
+pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 15%
 ```
 
 ## Understanding Context and Memory
@@ -189,7 +191,7 @@ For pods with multiple GPUs, the tool automatically manages GPU assignment:
 ### Automatic GPU assignment for multiple models
 ```bash
 # Each model automatically uses the next available GPU
-pi start microsoft/Phi-3-mini-4k-instruct --memory 20%  # Auto-assigns to GPU 0
+pi start microsoft/Phi-3-mini-128k-instruct --memory 20%  # Auto-assigns to GPU 0
 pi start Qwen/Qwen2.5-7B-Instruct --memory 20%         # Auto-assigns to GPU 1
 pi start meta-llama/Llama-3.1-8B --memory 20%          # Auto-assigns to GPU 2
 
@@ -204,6 +206,25 @@ pi start meta-llama/Llama-3.1-70B-Instruct --all-gpus
 pi start Qwen/Qwen2.5-72B-Instruct --all-gpus --context 64k
 ```
 
+### Advanced: Custom vLLM arguments
+```bash
+# Pass custom arguments directly to vLLM with --vllm-args
+# Everything after --vllm-args is passed to vLLM unchanged
+
+# Qwen3-Coder 480B on 8xH200 with expert parallelism
+pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --name qwen-coder --vllm-args \
+  --data-parallel-size 8 --enable-expert-parallel
+  --tool-call-parser qwen3_coder --enable-auto-tool-choice
+
+# DeepSeek with custom quantization
+pi start deepseek-ai/DeepSeek-Coder-V2-Instruct --name deepseek --vllm-args \
+  --tensor-parallel-size 4 --quantization fp8 --trust-remote-code
+
+# Mixtral with pipeline parallelism
+pi start mistralai/Mixtral-8x22B-Instruct-v0.1 --name mixtral --vllm-args \
+  --tensor-parallel-size 8 --pipeline-parallel-size 2
+```
+
 ### Check GPU usage
 ```bash
 pi ssh "nvidia-smi"
@@ -215,6 +236,12 @@ pi ssh "nvidia-smi"
 - **Port Allocation**: Each model runs on a separate port (8001, 8002, etc.) allowing multiple models on one GPU.
 - **Memory Management**: vLLM uses PagedAttention for efficient memory use with less than 4% waste.
 - **Model Caching**: Models are downloaded once and cached on the pod.
+- **Tool Parser Auto-Detection**: The tool automatically selects the appropriate tool parser based on the model:
+  - Qwen models: `hermes` (Qwen3-Coder: `qwen3_coder` if available)
+  - Mistral models: `mistral` with optimized chat template
+  - Llama models: `llama3_json` or `llama4_pythonic` based on version
+  - InternLM models: `internlm`
+  - And more... Override with `--vllm-args --tool-call-parser <parser>`
 
 
 ## Troubleshooting

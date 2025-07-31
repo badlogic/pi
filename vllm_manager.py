@@ -8,6 +8,7 @@ import json
 import subprocess as sp
 import psutil
 import socket
+import base64
 from pathlib import Path
 from typing import Dict, Optional
 from datetime import datetime
@@ -97,7 +98,76 @@ class VLLMManager:
         
         return self.models
     
-    def start(self, model_id: str, name: Optional[str] = None, max_len: int = 8192, gpu_memory_utilization: float = None, tensor_parallel_size: int = 1, gpu_ids: Optional[str] = None):
+    def get_tool_parser_for_model(self, model_id: str) -> tuple[str, Optional[str]]:
+        """Determine the appropriate tool parser and chat template for a model."""
+        model_lower = model_id.lower()
+        
+        # Qwen models
+        if 'qwen' in model_lower:
+            if 'qwen3-coder' in model_lower:
+                return "qwen3_coder", None  # Try qwen3_coder if it exists
+            elif 'qwen2.5' in model_lower or 'qwq' in model_lower:
+                return "hermes", None  # Qwen2.5 uses hermes
+            else:
+                return "hermes", None  # Default for other Qwen models
+        
+        # Mistral models
+        elif 'mistral' in model_lower:
+            return "mistral", "examples/tool_chat_template_mistral_parallel.jinja"
+        
+        # Llama models
+        elif 'llama' in model_lower or 'meta-llama' in model_lower:
+            if 'llama-4' in model_lower:
+                return "llama4_pythonic", "examples/tool_chat_template_llama4_pythonic.jinja"
+            elif 'llama-3.2' in model_lower:
+                return "llama3_json", "examples/tool_chat_template_llama3.2_json.jinja"
+            elif 'llama-3.1' in model_lower:
+                return "llama3_json", "examples/tool_chat_template_llama3.1_json.jinja"
+            else:
+                return "llama3_json", None
+        
+        # InternLM models
+        elif 'internlm' in model_lower:
+            return "internlm", "examples/tool_chat_template_internlm2_tool.jinja"
+        
+        # Jamba models
+        elif 'jamba' in model_lower:
+            return "jamba", None
+        
+        # Granite models
+        elif 'granite' in model_lower:
+            if 'granite-20b-functioncalling' in model_lower:
+                return "granite-20b-fc", "examples/tool_chat_template_granite_20b_fc.jinja"
+            elif 'granite-3.0' in model_lower:
+                return "granite", "examples/tool_chat_template_granite.jinja"
+            else:
+                return "granite", None
+        
+        # DeepSeek models
+        elif 'deepseek' in model_lower:
+            if 'deepseek-r1' in model_lower:
+                return "deepseek_v3", "examples/tool_chat_template_deepseekr1.jinja"
+            elif 'deepseek-v3' in model_lower:
+                return "deepseek_v3", "examples/tool_chat_template_deepseekv3.jinja"
+            else:
+                return "hermes", None  # Fallback for other DeepSeek models
+        
+        # xLAM models
+        elif 'xlam' in model_lower:
+            if 'llama-xlam' in model_lower:
+                return "xlam", "examples/tool_chat_template_xlam_llama.jinja"
+            else:
+                return "xlam", "examples/tool_chat_template_xlam_qwen.jinja"
+        
+        # Phi models (Microsoft)
+        elif 'phi' in model_lower:
+            return "hermes", None  # Phi models generally work with hermes
+        
+        # Default fallback
+        else:
+            return "hermes", None
+    
+    def start(self, model_id: str, name: Optional[str] = None, max_len: Optional[int] = None, gpu_memory_utilization: float = None, tensor_parallel_size: int = 1, gpu_ids: Optional[str] = None):
         # Generate name
         if not name:
             name = model_id.split('/')[-1].lower().replace('-', '_')
@@ -120,6 +190,10 @@ class VLLMManager:
             print("         Examples: 0.2 for small models, 0.5 for medium, 0.9 for large")
             gpu_memory_utilization = 0.9
         
+        # Get appropriate tool parser for the model
+        tool_parser, chat_template = self.get_tool_parser_for_model(model_id)
+        print(f"Auto-detected tool parser: {tool_parser}" + (f" with chat template: {chat_template}" if chat_template else ""))
+        
         # Start vLLM (use venv python if available)
         python_cmd = str(Path.home() / "vllm_env/bin/python3") if (Path.home() / "vllm_env/bin/python3").exists() else "python3"
         cmd = [
@@ -127,21 +201,25 @@ class VLLMManager:
             "--model", model_id,
             "--host", "0.0.0.0",
             "--port", str(port),
-            "--max-model-len", str(max_len),
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--enable-auto-tool-choice",
-            "--tool-call-parser", "hermes"
+            "--tool-call-parser", tool_parser
         ]
+        
+        # Add chat template if specified
+        if chat_template:
+            cmd.extend(["--chat-template", chat_template])
+        
+        # Only add max-model-len if specified
+        if max_len is not None:
+            cmd.extend(["--max-model-len", str(max_len)])
         
         # Add tensor parallel size if > 1
         if tensor_parallel_size > 1:
             cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
         
-        # Get environment with correct HF token
+        # Use environment as-is (already configured by .pirc)
         env = os.environ.copy()
-        
-        # Disable vLLM telemetry
-        env['VLLM_NO_USAGE_STATS'] = '1'
         
         # Handle GPU assignment
         assigned_gpu = None
@@ -162,32 +240,14 @@ class VLLMManager:
                     env['CUDA_VISIBLE_DEVICES'] = str(assigned_gpu)
                     print(f"Auto-assigned to GPU {assigned_gpu}")
         
-        # Try to read tokens from bashrc first
-        bashrc_file = Path.home() / ".bashrc"
-        if bashrc_file.exists():
-            with open(bashrc_file, 'r') as f:
-                for line in f:
-                    if line.strip().startswith('export ') and ('HF_TOKEN' in line or 'HUGGING_FACE' in line):
-                        key_value = line.strip()[7:]  # Remove 'export '
-                        if '=' in key_value:
-                            key, value = key_value.split('=', 1)
-                            env[key] = value.strip('"')
-        
-        # Also check token file (legacy support)
-        token_file = Path.home() / ".hf_token"
-        if token_file.exists():
-            with open(token_file, 'r') as f:
-                for line in f:
-                    if line.strip().startswith('export '):
-                        key_value = line.strip()[7:]  # Remove 'export '
-                        if '=' in key_value:
-                            key, value = key_value.split('=', 1)
-                            env[key] = value.strip('"')
         
         # Open log file and start process
         with open(log_file, 'w') as f:
             f.write(f"=== Starting {model_id} at {datetime.now()} ===\n")
             f.write(f"Command: {' '.join(cmd)}\n")
+            f.write(f"Tool Parser: {tool_parser}\n")
+            if chat_template:
+                f.write(f"Chat Template: {chat_template}\n")
             if gpu_ids:
                 f.write(f"CUDA_VISIBLE_DEVICES: {gpu_ids}\n")
             if tensor_parallel_size > 1:
@@ -217,6 +277,63 @@ class VLLMManager:
             "log_file": str(log_file),
             "gpu_id": assigned_gpu,
             "tensor_parallel_size": tensor_parallel_size if tensor_parallel_size > 1 else 1
+        }
+        self.save()
+        
+        return {"name": name, "port": port, "pid": process.pid, "log_file": str(log_file)}
+    
+    def start_raw(self, model_id: str, name: str, vllm_args: str):
+        # Check if already running
+        if name in self.models and self.is_running(self.models[name]['pid']):
+            return self.models[name]
+        
+        # Find port
+        port = self.find_free_port()
+        
+        # Create log file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = LOGS_DIR / f"{name}_{timestamp}.log"
+        
+        # Start vLLM with raw arguments
+        python_cmd = str(Path.home() / "vllm_env/bin/python3") if (Path.home() / "vllm_env/bin/python3").exists() else "python3"
+        
+        # Base command - ensure vllm_args is properly quoted
+        cmd = f'{python_cmd} -m vllm.entrypoints.openai.api_server --model "{model_id}" --host 0.0.0.0 --port {port} {vllm_args}'
+        
+        # Use environment as-is (already configured by .pirc)
+        env = os.environ.copy()
+        
+        
+        # Open log file and start process
+        with open(log_file, 'w') as f:
+            f.write(f"=== Starting {model_id} at {datetime.now()} ===")
+            f.write(f"\nCommand: {cmd}\n")
+            # Never log tokens for security
+            hf_token_status = "SET" if env.get('HF_TOKEN') else "NOT SET"
+            hf_hub_token_status = "SET" if env.get('HUGGING_FACE_HUB_TOKEN') else "NOT SET"
+            f.write(f"HF_TOKEN: {hf_token_status}\n")
+            f.write(f"HUGGING_FACE_HUB_TOKEN: {hf_hub_token_status}\n")
+            f.write("=" * 60 + "\n\n")
+            f.flush()
+            
+            # Use shell=True for the command string
+            process = sp.Popen(
+                cmd, 
+                shell=True,
+                stdout=f, 
+                stderr=sp.STDOUT,  # Merge stderr into stdout
+                bufsize=1,  # Line buffered
+                universal_newlines=True,
+                env=env  # Pass the modified environment
+            )
+        
+        # Save info
+        self.models[name] = {
+            "pid": process.pid,
+            "port": port,
+            "model_id": model_id,
+            "log_file": str(log_file),
+            "raw_args": vllm_args
         }
         self.save()
         
@@ -297,12 +414,42 @@ def main():
             sys.exit(1)
         
         model_id = sys.argv[2]
-        name = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != '""' else None
-        max_len = int(sys.argv[4]) if len(sys.argv) > 4 else 8192
+        name = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] not in ['""', ''] else None
+        max_len = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] not in ['""', ''] else None
         gpu_memory = float(sys.argv[5]) if len(sys.argv) > 5 else None
         tensor_parallel = int(sys.argv[6]) if len(sys.argv) > 6 else 1
         
         model_result = manager.start(model_id, name, max_len, gpu_memory, tensor_parallel)
+        # Get external IP
+        try:
+            # Try to get IP from default interface
+            ip_result = sp.run(['hostname', '-I'], capture_output=True, text=True)
+            if ip_result.returncode == 0 and ip_result.stdout.strip():
+                host_ip = ip_result.stdout.strip().split()[0]
+            else:
+                host_ip = socket.gethostbyname(socket.gethostname())
+        except:
+            host_ip = socket.gethostbyname(socket.gethostname())
+        
+        print(f"Started {model_result['name']}")
+        print(f"URL: http://{host_ip}:{model_result['port']}/v1")
+        print(f"\nExport for OpenAI clients:")
+        print(f"export OPENAI_BASE_URL='http://{host_ip}:{model_result['port']}/v1'")
+    
+    elif cmd == "start_raw":
+        if len(sys.argv) < 5:
+            print("Usage: vllm_manager.py start_raw <model_id> <name> <vllm_args>")
+            sys.exit(1)
+        
+        model_id = sys.argv[2]
+        name = sys.argv[3]
+        vllm_args_base64 = sys.argv[4]
+        
+        # Decode base64 arguments
+        vllm_args = base64.b64decode(vllm_args_base64).decode('utf-8')
+        print(f"DEBUG: Decoded vllm_args: '{vllm_args}'")
+        
+        model_result = manager.start_raw(model_id, name, vllm_args)
         # Get external IP
         try:
             # Try to get IP from default interface

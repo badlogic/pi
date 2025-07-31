@@ -1,7 +1,7 @@
 {
   "name": "@badlogic/pi",
   "version": "1.0.0",
-  "description": "CLI tool for managing vLLM deployments on Prime Intellect GPU pods",
+  "description": "CLI tool for managing vLLM deployments on GPU pods from Prime Intellect, Vast.ai, etc.",
   "main": "pi",
   "bin": {
     "pi": "./pi"
