@@ -1,0 +1,42 @@
+{
+  "name": "@badlogic/pi",
+  "version": "1.0.0",
+  "description": "CLI tool for managing vLLM deployments on Prime Intellect GPU pods",
+  "main": "pi",
+  "bin": {
+    "pi": "./pi"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "llm",
+    "vllm",
+    "gpu",
+    "prime-intellect",
+    "ai",
+    "ml",
+    "cli"
+  ],
+  "author": "Mario Zechner",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/badlogic/pi-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/badlogic/pi-cli/issues"
+  },
+  "homepage": "https://github.com/badlogic/pi-cli#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "preferGlobal": true,
+  "files": [
+    "pi",
+    "pod_setup.sh",
+    "vllm_manager.py",
+    "README.md",
+    "LICENSE"
+  ]
+}

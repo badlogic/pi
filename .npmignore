@@ -1,0 +1,28 @@
+# Development files
+.git
+.gitignore
+*.log
+node_modules/
+
+# Test files
+test/
+*.test.js
+
+# Build artifacts
+*.tgz
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local config
+.pi_config
+
+# Temporary files
+multi_gpu_helper.sh
