@@ -213,8 +213,8 @@ pi start Qwen/Qwen2.5-72B-Instruct --all-gpus --context 64k
 
 # Qwen3-Coder 480B on 8xH200 with expert parallelism
 pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --name qwen-coder --vllm-args \
-  --data-parallel-size 8 --enable-expert-parallel
-  --tool-call-parser qwen3_coder --enable-auto-tool-choice
+  --data-parallel-size 8 --enable-expert-parallel \
+  --tool-call-parser qwen3_coder --enable-auto-tool-choice --max-model-len 200000
 
 # DeepSeek with custom quantization
 pi start deepseek-ai/DeepSeek-Coder-V2-Instruct --name deepseek --vllm-args \
