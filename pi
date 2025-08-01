@@ -210,14 +210,14 @@ class PrimeIntellectCLI {
             console.error('  --vllm-args        Pass remaining args directly to vLLM (ignores other options)');
             console.error('');
             console.error('Examples:');
-            console.error('  pi start microsoft/Phi-3-mini-128k-instruct');
-            console.error('  pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 30%');
+            console.error('  pi start Qwen/Qwen2.5-7B-Instruct');
+            console.error('  pi start Qwen/Qwen2.5-7B-Instruct --name qwen --memory 20%');
             console.error('  pi start meta-llama/Llama-3.1-70B-Instruct --all-gpus');
             console.error('  pi start meta-llama/Llama-3.1-405B --all-gpus --context 128k');
             console.error('');
             console.error('  # Custom vLLM args for Qwen3-Coder on 8xH200:');
             console.error('  pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --name qwen-coder --vllm-args \\');
-            console.error('    --data-parallel-size 8 --enable-expert-parallel --max-model-len 131072 \\');
+            console.error('    --data-parallel-size 8 --enable-expert-parallel \\');
             console.error('    --tool-call-parser qwen3_coder --enable-auto-tool-choice');
             process.exit(1);
         }
@@ -380,7 +380,7 @@ class PrimeIntellectCLI {
             });
 
             // Watch logs until startup complete
-            await this.logs(modelName);
+            await this.logs(modelName, true);  // autoExit = true for startup
 
             // Show model info after automatic exit
             showModelInfo();
@@ -436,7 +436,7 @@ class PrimeIntellectCLI {
             });
 
             // Watch logs until startup complete
-            await this.logs(name);
+            await this.logs(name, true);  // autoExit = true for startup
 
             // Show model info after automatic exit
             showModelInfo();
@@ -469,7 +469,7 @@ class PrimeIntellectCLI {
         }
     }
 
-    async logs(name) {
+    async logs(name, autoExit = false) {
         if (!name) {
             console.error('Usage: pi logs <name>');
             process.exit(1);
@@ -511,13 +511,15 @@ class PrimeIntellectCLI {
                 process.stdout.write(data);
                 buffer += data.toString();
 
-                // Check for vLLM startup complete message
-                if (buffer.includes('Application startup complete.') ||
-                    buffer.includes('Uvicorn running on')) {
-                    setTimeout(() => {
-                        proc.kill();
-                        resolve();
-                    }, 500); // Small delay to ensure final messages are shown
+                // Only check for startup messages if autoExit is enabled
+                if (autoExit) {
+                    if (buffer.includes('Application startup complete.') ||
+                        buffer.includes('Uvicorn running on')) {
+                        setTimeout(() => {
+                            proc.kill();
+                            resolve();
+                        }, 500); // Small delay to ensure final messages are shown
+                    }
                 }
 
                 // Keep buffer size manageable
@@ -666,18 +668,14 @@ class PrimeIntellectCLI {
         const models = this.getRunningModels();
         const model = models[name];
 
-        if (!model) {
+        if (!model || !model.url) {
             console.error(`Model '${name}' is not running`);
             console.error('Running models:', Object.keys(models).join(', ') || 'none');
             process.exit(1);
         }
 
-        // Get pod IP
-        const output = this.ssh('hostname -I').trim();
-        const podIp = output.split(' ')[0];
-
-        // Make API call
-        const url = `http://${podIp}:${model.port}/v1/chat/completions`;
+        // Make API call directly to the model's external URL
+        const url = `${model.url}/chat/completions`;
         const payload = {
             model: model.model_id,
             messages: [{ role: 'user', content: message }],
@@ -728,8 +726,8 @@ class PrimeIntellectCLI {
         console.log('  pi shell                           SSH into active pod');
 
         console.log('\nQuick Example:');
-        console.log('  pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 30%');
-        console.log('  pi prompt phi3 "What is 2+2?"');
+        console.log('  pi start Qwen/Qwen2.5-7B-Instruct --name qwen');
+        console.log('  pi prompt qwen "What is 2+2?"');
 
         if (this.config.active && this.config.pods[this.config.active]) {
             console.log(`\nActive pod: ${this.config.active} (${this.config.pods[this.config.active].ssh})`);
@@ -750,13 +748,14 @@ class PrimeIntellectCLI {
             for (const line of lines) {
                 if (line.match(/^[a-zA-Z0-9_-]+:$/)) {
                     currentModel = line.slice(0, -1);
-                } else if (currentModel && line.includes('Model:')) {
-                    const modelId = line.split('Model:')[1].trim();
-                    models[currentModel] = { model_id: modelId };
-                } else if (currentModel && line.includes('Port:')) {
-                    const port = parseInt(line.split('Port:')[1].trim());
-                    if (models[currentModel]) {
-                        models[currentModel].port = port;
+                    models[currentModel] = {};
+                } else if (currentModel) {
+                    if (line.includes('Model:')) {
+                        models[currentModel].model_id = line.split('Model:')[1].trim();
+                    } else if (line.includes('Port:')) {
+                        models[currentModel].port = parseInt(line.split('Port:')[1].trim());
+                    } else if (line.includes('URL:')) {
+                        models[currentModel].url = line.split('URL:')[1].trim();
                     }
                 }
             }
@@ -822,7 +821,7 @@ class PrimeIntellectCLI {
                 break;
 
             case 'logs':
-                await this.logs(args[0]);
+                await this.logs(args[0], false);  // autoExit = false for manual logs command
                 break;
 
             case 'prompt': {

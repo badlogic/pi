@@ -161,7 +161,8 @@ class VLLMManager:
         
         # Phi models (Microsoft)
         elif 'phi' in model_lower:
-            return "hermes", None  # Phi models generally work with hermes
+            # Phi models don't have tool calling tokens, disable by default
+            return None, None
         
         # Default fallback
         else:
@@ -192,7 +193,6 @@ class VLLMManager:
         
         # Get appropriate tool parser for the model
         tool_parser, chat_template = self.get_tool_parser_for_model(model_id)
-        print(f"Auto-detected tool parser: {tool_parser}" + (f" with chat template: {chat_template}" if chat_template else ""))
         
         # Start vLLM (use venv python if available)
         python_cmd = str(Path.home() / "vllm_env/bin/python3") if (Path.home() / "vllm_env/bin/python3").exists() else "python3"
@@ -201,14 +201,21 @@ class VLLMManager:
             "--model", model_id,
             "--host", "0.0.0.0",
             "--port", str(port),
-            "--gpu-memory-utilization", str(gpu_memory_utilization),
-            "--enable-auto-tool-choice",
-            "--tool-call-parser", tool_parser
+            "--gpu-memory-utilization", str(gpu_memory_utilization)
         ]
         
-        # Add chat template if specified
-        if chat_template:
-            cmd.extend(["--chat-template", chat_template])
+        # Only add tool calling if a parser is available
+        if tool_parser:
+            print(f"Auto-detected tool parser: {tool_parser}" + (f" with chat template: {chat_template}" if chat_template else ""))
+            cmd.extend([
+                "--enable-auto-tool-choice",
+                "--tool-call-parser", tool_parser
+            ])
+            # Add chat template if specified
+            if chat_template:
+                cmd.extend(["--chat-template", chat_template])
+        else:
+            print(f"Tool calling disabled for {model_id} (no compatible parser)")
         
         # Only add max-model-len if specified
         if max_len is not None:
@@ -245,18 +252,16 @@ class VLLMManager:
         with open(log_file, 'w') as f:
             f.write(f"=== Starting {model_id} at {datetime.now()} ===\n")
             f.write(f"Command: {' '.join(cmd)}\n")
-            f.write(f"Tool Parser: {tool_parser}\n")
-            if chat_template:
-                f.write(f"Chat Template: {chat_template}\n")
+            if tool_parser:
+                f.write(f"Tool Parser: {tool_parser}\n")
+                if chat_template:
+                    f.write(f"Chat Template: {chat_template}\n")
+            else:
+                f.write(f"Tool Calling: Disabled (no compatible parser)\n")
             if gpu_ids:
                 f.write(f"CUDA_VISIBLE_DEVICES: {gpu_ids}\n")
             if tensor_parallel_size > 1:
                 f.write(f"Tensor Parallel Size: {tensor_parallel_size}\n")
-            # Never log tokens for security
-            hf_token_status = "SET" if env.get('HF_TOKEN') else "NOT SET"
-            hf_hub_token_status = "SET" if env.get('HUGGING_FACE_HUB_TOKEN') else "NOT SET"
-            f.write(f"HF_TOKEN: {hf_token_status}\n")
-            f.write(f"HUGGING_FACE_HUB_TOKEN: {hf_hub_token_status}\n")
             f.write("=" * 60 + "\n\n")
             f.flush()
             
@@ -308,11 +313,6 @@ class VLLMManager:
         with open(log_file, 'w') as f:
             f.write(f"=== Starting {model_id} at {datetime.now()} ===")
             f.write(f"\nCommand: {cmd}\n")
-            # Never log tokens for security
-            hf_token_status = "SET" if env.get('HF_TOKEN') else "NOT SET"
-            hf_hub_token_status = "SET" if env.get('HUGGING_FACE_HUB_TOKEN') else "NOT SET"
-            f.write(f"HF_TOKEN: {hf_token_status}\n")
-            f.write(f"HUGGING_FACE_HUB_TOKEN: {hf_hub_token_status}\n")
             f.write("=" * 60 + "\n\n")
             f.flush()
             

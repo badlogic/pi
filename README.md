@@ -241,8 +241,71 @@ pi ssh "nvidia-smi"
   - Mistral models: `mistral` with optimized chat template
   - Llama models: `llama3_json` or `llama4_pythonic` based on version
   - InternLM models: `internlm`
-  - And more... Override with `--vllm-args --tool-call-parser <parser>`
+  - Phi models: Tool calling disabled by default (no compatible tokens)
+  - Override with `--vllm-args --tool-call-parser <parser> --enable-auto-tool-choice`
 
+
+## Tool Calling (Function Calling)
+
+Tool calling allows LLMs to request the use of external functions/APIs, but it's a complex feature with many caveats:
+
+### The Reality of Tool Calling
+
+1. **Model Compatibility**: Not all models support tool calling, even if they claim to. Many models lack the special tokens or training needed for reliable tool parsing.
+
+2. **Parser Mismatches**: Different models use different tool calling formats:
+   - Hermes format (XML-like)
+   - Mistral format (specific JSON structure)
+   - Llama format (JSON-based or pythonic)
+   - Custom formats for each model family
+
+3. **Common Issues**:
+   - "Could not locate tool call start/end tokens" - Model doesn't have required special tokens
+   - Malformed JSON/XML output - Model wasn't trained for the parser format
+   - Tool calls when you don't want them - Model overeager to use tools
+   - No tool calls when you need them - Model doesn't understand when to use tools
+
+### How We Handle It
+
+The tool automatically detects the model and tries to use an appropriate parser:
+- **Qwen models**: `hermes` parser (Qwen3-Coder uses `qwen3_coder`)
+- **Mistral models**: `mistral` parser with custom template
+- **Llama models**: `llama3_json` or `llama4_pythonic` based on version
+- **Phi models**: Tool calling disabled (no compatible tokens)
+
+### Your Options
+
+1. **Let auto-detection handle it** (default):
+   ```bash
+   pi start meta-llama/Llama-3.1-8B-Instruct --name llama
+   ```
+
+2. **Force a specific parser** (if you know better):
+   ```bash
+   pi start model/name --name mymodel --vllm-args \
+     --tool-call-parser mistral --enable-auto-tool-choice
+   ```
+
+3. **Disable tool calling entirely** (most reliable):
+   ```bash
+   pi start model/name --name mymodel --vllm-args \
+     --disable-tool-call-parser
+   ```
+
+4. **Handle tools in your application** (recommended for production):
+   - Send regular prompts asking the model to output JSON
+   - Parse the response in your code
+   - More control, more reliable
+
+### Best Practices
+
+- **Test first**: Try a simple tool call to see if it works with your model
+- **Have a fallback**: Be prepared for tool calling to fail
+- **Consider alternatives**: Sometimes a well-crafted prompt works better than tool calling
+- **Read the docs**: Check the model card for tool calling examples
+- **Monitor logs**: Check `~/.vllm_logs/` for parser errors
+
+Remember: Tool calling is still an evolving feature in the LLM ecosystem. What works today might break tomorrow with a model update.
 
 ## Troubleshooting
 
@@ -251,3 +314,4 @@ pi ssh "nvidia-smi"
 - **Connection Refused**: Check pod is running and port is correct
 - **HF Token Issues**: Ensure HF_TOKEN is set before running setup
 - **Access Denied**: Some models (like Llama, Mistral) require completing an access request on HuggingFace first. Visit the model page and click "Request access"
+- **Tool Calling Errors**: See the Tool Calling section above - consider disabling it or using a different model
