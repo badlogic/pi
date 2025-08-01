@@ -204,7 +204,7 @@ class PrimeIntellectCLI {
             console.error('');
             console.error('Options:');
             console.error('  --name <name>      Model alias (default: auto-generated)');
-            console.error('  --context <size>   Context window: 4k, 8k, 16k, 32k or 4096, 8192, etc (default: model default)');
+            console.error('  --context <size>   Context window: 4k, 8k, 16k, 32k, 64k, 128k or 4096, 8192, etc (default: model default)');
             console.error('  --memory <percent> GPU memory: 30%, 50%, 90% or 0.3, 0.5, 0.9 (default: 90%)');
             console.error('  --all-gpus         Use all GPUs with tensor parallelism (ignores --memory)');
             console.error('  --vllm-args        Pass remaining args directly to vLLM (ignores other options)');
@@ -719,15 +719,20 @@ class PrimeIntellectCLI {
         console.log('  pi prompt <name> <msg>             Chat with a model\n');
         console.log('Start Options:');
         console.log('  --name <name>      Model alias (default: auto-generated)');
-        console.log('  --context <size>   Context window: 4k, 16k, 32k (default: 8k)');
+        console.log('  --context <size>   Context window: 4k, 8k, 16k, 32k, 64k, 128k (default: model default)');
         console.log('  --memory <percent> GPU memory: 30%, 50%, 90% (default: 90%)');
-        console.log('  --all-gpus         Use all GPUs with tensor parallelism\n');
+        console.log('  --all-gpus         Use all GPUs with tensor parallelism');
+        console.log('  --vllm-args        Pass remaining args directly to vLLM\n');
         console.log('Utility:');
         console.log('  pi shell                           SSH into active pod');
 
-        console.log('\nQuick Example:');
+        console.log('\nQuick Examples:');
         console.log('  pi start Qwen/Qwen2.5-7B-Instruct --name qwen');
         console.log('  pi prompt qwen "What is 2+2?"');
+        console.log('\n  # Qwen3-Coder on 8xH200 with custom vLLM args:');
+        console.log('  pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --name qwen-coder --vllm-args \\');
+        console.log('    --data-parallel-size 8 --enable-expert-parallel \\');
+        console.log('    --tool-call-parser qwen3_coder --enable-auto-tool-choice --max-model-len 200000');
 
         if (this.config.active && this.config.pods[this.config.active]) {
             console.log(`\nActive pod: ${this.config.active} (${this.config.pods[this.config.active].ssh})`);
@@ -768,6 +773,19 @@ class PrimeIntellectCLI {
 
     async run() {
         const [,, command, ...args] = process.argv;
+
+        // Handle --version flag
+        if (command === '--version' || command === '-v') {
+            const packageJsonPath = path.join(__dirname, 'package.json');
+            try {
+                const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+                console.log(packageJson.version);
+            } catch (error) {
+                console.error('Error reading version:', error.message);
+                process.exit(1);
+            }
+            return;
+        }
 
         switch (command) {
             case 'setup': {
