@@ -1,10 +1,10 @@
 {
   "name": "@mariozechner/pi",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "CLI tool for managing vLLM deployments on GPU pods from Prime Intellect, Vast.ai, etc.",
-  "main": "pi",
+  "main": "pi.js",
   "bin": {
-    "pi": "pi"
+    "pi": "pi.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -33,7 +33,7 @@
   },
   "preferGlobal": true,
   "files": [
-    "pi",
+    "pi.js",
     "pod_setup.sh",
     "vllm_manager.py",
     "README.md",
