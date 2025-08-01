@@ -315,3 +315,12 @@ Remember: Tool calling is still an evolving feature in the LLM ecosystem. What w
 - **HF Token Issues**: Ensure HF_TOKEN is set before running setup
 - **Access Denied**: Some models (like Llama, Mistral) require completing an access request on HuggingFace first. Visit the model page and click "Request access"
 - **Tool Calling Errors**: See the Tool Calling section above - consider disabling it or using a different model
+- **Model Won't Stop**: If `pi stop` fails, force kill all Python processes and verify GPU is free:
+  ```bash
+  pi ssh "killall -9 python3"
+  pi ssh "nvidia-smi"  # Should show no processes using GPU
+  ```
+- **Model Deployment Fails**: Pi currently does not check GPU memory utilization before starting models. If deploying a model fails:
+  1. Check if GPUs are full with other models: `pi ssh "nvidia-smi"`
+  2. If memory is insufficient, make room by stopping running models: `pi stop <model_name>`
+  3. If the error persists with sufficient memory, copy the error output and feed it to an LLM for troubleshooting assistance
