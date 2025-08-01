@@ -158,7 +158,7 @@ pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 15%
 ## Understanding Context and Memory
 
 ### Context Window vs Output Tokens
-The `context` parameter sets the **total** token budget for input + output combined:
+Models are loaded with their default context length. You can use the `context` parameter to specify a lower or higher context length. The `context` parameter sets the **total** token budget for input + output combined:
 - Starting a model with `context=8k` means 8,192 tokens total
 - If your prompt uses 6,000 tokens, you have 2,192 tokens left for the response
 - Each OpenAI API request to the model can specify `max_output_tokens` to control output length within this budget
