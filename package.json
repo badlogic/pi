@@ -1,10 +1,10 @@
 {
   "name": "@badlogic/pi",
-  "version": "1.0.0",
+  "version": "0.1.1",
   "description": "CLI tool for managing vLLM deployments on GPU pods from Prime Intellect, Vast.ai, etc.",
   "main": "pi",
   "bin": {
-    "pi": "./pi"
+    "pi": "pi"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -22,12 +22,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/badlogic/pi-cli.git"
+    "url": "git+https://github.com/badlogic/pi.git"
   },
   "bugs": {
-    "url": "https://github.com/badlogic/pi-cli/issues"
+    "url": "https://github.com/badlogic/pi/issues"
   },
-  "homepage": "https://github.com/badlogic/pi-cli#readme",
+  "homepage": "https://github.com/badlogic/pi#readme",
   "engines": {
     "node": ">=14.0.0"
   },
