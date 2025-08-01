@@ -370,6 +370,7 @@ class PrimeIntellectCLI {
                     console.log(`\nTo use with OpenAI clients:`);
                     console.log(exportCmd);
                     console.log(`export OPENAI_API_KEY='dummy'`);
+                    console.log(`export OPENAI_MODEL='${modelId}'`);
                 }
                 console.log('='.repeat(60));
             };
@@ -426,6 +427,7 @@ class PrimeIntellectCLI {
                     console.log(`\nTo use with OpenAI clients:`);
                     console.log(exportCmd);
                     console.log(`export OPENAI_API_KEY='dummy'`);
+                    console.log(`export OPENAI_MODEL='${modelId}'`);
                 }
                 console.log('='.repeat(60));
             };

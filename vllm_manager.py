@@ -435,6 +435,7 @@ def main():
         print(f"URL: http://{host_ip}:{model_result['port']}/v1")
         print(f"\nExport for OpenAI clients:")
         print(f"export OPENAI_BASE_URL='http://{host_ip}:{model_result['port']}/v1'")
+        print(f"export OPENAI_MODEL='{model_id}'")
     
     elif cmd == "start_raw":
         if len(sys.argv) < 5:
@@ -465,6 +466,7 @@ def main():
         print(f"URL: http://{host_ip}:{model_result['port']}/v1")
         print(f"\nExport for OpenAI clients:")
         print(f"export OPENAI_BASE_URL='http://{host_ip}:{model_result['port']}/v1'")
+        print(f"export OPENAI_MODEL='{model_id}'")
     
     elif cmd == "stop":
         if len(sys.argv) < 3:
