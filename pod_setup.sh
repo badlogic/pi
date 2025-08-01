@@ -76,7 +76,27 @@ pip install vllm huggingface-hub psutil
 
 # Install FlashInfer for better performance (~15% sampler latency reduction)
 echo "Installing FlashInfer for performance optimization..."
-pip install flashinfer-cu12 || echo "FlashInfer installation failed (optional)"
+echo "Building FlashInfer from source..."
+
+# Clone and build FlashInfer from source
+cd /tmp
+if [ -d "flashinfer" ]; then
+    rm -rf flashinfer
+fi
+
+git clone https://github.com/flashinfer-ai/flashinfer.git --recursive
+cd flashinfer
+
+# Install from source
+if python -m pip install -v .; then
+    echo "FlashInfer successfully built from source"
+else
+    echo "FlashInfer installation failed (optional)"
+fi
+
+# Clean up
+cd /
+rm -rf /tmp/flashinfer
 
 # Setup HuggingFace token from environment
 if [ -z "$HF_TOKEN" ]; then
@@ -102,6 +122,7 @@ fi
 export VLLM_USE_FLASHINFER_SAMPLER=1
 export VLLM_USE_DEEP_GEMM=1
 export VLLM_NO_USAGE_STATS=1
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 
 # HuggingFace tokens
 export HF_TOKEN="$HF_TOKEN"

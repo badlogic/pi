@@ -218,7 +218,7 @@ class PrimeIntellectCLI {
             console.error('  # Custom vLLM args for Qwen3-Coder on 8xH200:');
             console.error('  pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --name qwen-coder --vllm-args \\');
             console.error('    --data-parallel-size 8 --enable-expert-parallel \\');
-            console.error('    --tool-call-parser qwen3_coder --enable-auto-tool-choice --max-model-len 200000');
+            console.error('    --tool-call-parser qwen3_coder --enable-auto-tool-choice --gpu-memory-utilization 0.9 --max-model-len 200000');
             process.exit(1);
         }
 
