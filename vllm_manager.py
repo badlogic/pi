@@ -351,6 +351,37 @@ class VLLMManager:
         except:
             pass
         
+        # Force kill all vLLM-related Python processes to ensure cleanup
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            try:
+                # Get all python processes containing 'vllm'
+                ps_result = sp.run(['ps', 'aux'], capture_output=True, text=True)
+                vllm_pids = []
+                
+                for line in ps_result.stdout.split('\n'):
+                    if 'python' in line and 'vllm' in line and 'vllm_manager.py' not in line:
+                        # Extract PID (second column)
+                        parts = line.split()
+                        if len(parts) > 1:
+                            vllm_pids.append(parts[1])
+                
+                if not vllm_pids:
+                    break  # No vLLM processes found
+                
+                # Kill the vLLM processes
+                for pid in vllm_pids:
+                    try:
+                        sp.run(['kill', '-9', pid], capture_output=True)
+                    except:
+                        pass
+                
+                # Small delay between attempts
+                import time
+                time.sleep(0.5)
+            except:
+                break
+        
         del self.models[name]
         self.save()
         return True

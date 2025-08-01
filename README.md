@@ -39,7 +39,7 @@ A simple CLI tool that automatically sets up and manages vLLM deployments on GPU
 
 - **Node.js 14+** - To run the CLI tool on your machine
 - **HuggingFace Token** - Required for downloading models (get one at https://huggingface.co/settings/tokens)
-- **Prime Intellect Account** - Sign up at https://app.primeintellect.ai
+- **Prime Intellect/DataCrunch/Vast.ai Account**
 - **GPU Pod** - At least one running pod with:
   - Ubuntu 22+ image (selected when creating pod)
   - SSH access enabled
@@ -110,6 +110,33 @@ pi pod remove <pod-name>             # Remove pod from config
 pi shell                             # SSH into active pod
 ```
 
+#### Working with Multiple Pods
+
+You can manage models on any pod without switching the active pod by using the `--pod` parameter:
+
+```bash
+# List models on a specific pod
+pi list --pod prod
+
+# Start a model on a specific pod
+pi start Qwen/Qwen2.5-7B-Instruct --name qwen --pod dev
+
+# Stop a model on a specific pod
+pi stop qwen --pod dev
+
+# View logs from a specific pod
+pi logs qwen --pod dev
+
+# Test a model on a specific pod
+pi prompt qwen "Hello!" --pod dev
+
+# SSH into a specific pod
+pi shell --pod prod
+pi ssh --pod prod "nvidia-smi"
+```
+
+This allows you to manage multiple environments (dev, staging, production) from a single machine without constantly switching between them.
+
 ### Model Management
 
 Each model runs as a separate vLLM instance with its own port and GPU allocation. The tool automatically manages GPU assignment on multi-GPU systems and ensures models don't conflict. Models are accessed by their short names (either auto-generated or specified with --name).
@@ -122,11 +149,14 @@ pi start <model> [options]           # Start a model with options
   --context <size>                   # Context window: 4k, 8k, 16k, 32k (default: model default)
   --memory <percent>                 # GPU memory: 30%, 50%, 90% (default: 90%)
   --all-gpus                         # Use tensor parallelism across all GPUs
+  --pod <pod-name>                   # Run on specific pod (default: active pod)
   --vllm-args                        # Pass all remaining args directly to vLLM
 pi stop [name]                       # Stop a model (or all if no name)
 pi logs <name>                       # View logs with tail -f
 pi prompt <name> "message"           # Quick test prompt
 ```
+
+All model management commands support the `--pod` parameter to target a specific pod without switching the active pod.
 
 ## Examples
 
@@ -199,6 +229,11 @@ pi start meta-llama/Llama-3.1-8B --memory 20%          # Auto-assigns to GPU 2
 pi list
 ```
 
+## Qwen on a single H200
+```bash
+pi start Qwen/Qwen3-Coder-30B-A3B-Instruct qwen3-30b
+```
+
 ### Run large models across all GPUs
 ```bash
 # Use --all-gpus for tensor parallelism across all available GPUs
@@ -214,7 +249,7 @@ pi start Qwen/Qwen2.5-72B-Instruct --all-gpus --context 64k
 # Qwen3-Coder 480B on 8xH200 with expert parallelism
 pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --name qwen-coder --vllm-args \
   --data-parallel-size 8 --enable-expert-parallel \
-  --tool-call-parser qwen3_coder --enable-auto-tool-choice --max-model-len 200000
+  --tool-call-parser qwen3_coder --enable-auto-tool-choice --gpu-memory-utilization 0.95 --max-model-len 200000
 
 # DeepSeek with custom quantization
 pi start deepseek-ai/DeepSeek-Coder-V2-Instruct --name deepseek --vllm-args \
@@ -224,6 +259,12 @@ pi start deepseek-ai/DeepSeek-Coder-V2-Instruct --name deepseek --vllm-args \
 pi start mistralai/Mixtral-8x22B-Instruct-v0.1 --name mixtral --vllm-args \
   --tensor-parallel-size 8 --pipeline-parallel-size 2
 ```
+
+**Note on Special Models**: Some models require specific vLLM arguments to run properly:
+- **Qwen3-Coder 480B**: Requires `--enable-expert-parallel` for MoE support
+- **Kimi K2**: May require custom arguments - check the model's documentation
+- **DeepSeek V3**: Often needs `--trust-remote-code` for custom architectures
+- When in doubt, consult the model's HuggingFace page or documentation for recommended vLLM settings
 
 ### Check GPU usage
 ```bash
@@ -324,3 +365,25 @@ Remember: Tool calling is still an evolving feature in the LLM ecosystem. What w
   1. Check if GPUs are full with other models: `pi ssh "nvidia-smi"`
   2. If memory is insufficient, make room by stopping running models: `pi stop <model_name>`
   3. If the error persists with sufficient memory, copy the error output and feed it to an LLM for troubleshooting assistance
+- **Large Model Loading Crashes**: When loading very large models (e.g., Qwen3-Coder 480B), the process may crash after downloading weights:
+  1. This often happens during the tensor loading phase after successful download
+  2. Simply restart the model - cached weights will be reused: `pi start <same command>`
+  3. The second attempt is much faster since downloads are already cached in `~/.cache/huggingface/`
+
+## Timing notes
+- 8x B200 on DataCrunch, Spot instance
+   - pi setup
+      - 1:27 min
+   - pi start Qwen/Qwen3-Coder-30B-A3B-Instruct
+      - (cold start incl. HF download, kernel warmup) 7:32m
+      - (warm start, HF model already in cache) 1:02m
+
+- 8x H200 on DataCrunch, Spot instance
+   - pi setup
+      -2:04m
+   - pi start Qwen/Qwen3-Coder-30B-A3B-Instruct
+      - (cold start incl. HF download, kernel warmup) 9:30m
+      - (warm start, HF model already in cache) 1:14m
+   - pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 ...
+      - (cold start incl. HF download, kernel warmup)
+      - (warm start, HF model already in cache)
