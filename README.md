@@ -5,12 +5,12 @@ Quickly deploy LLMs on GPU pods from [Prime Intellect](https://www.primeintellec
 ## Installation
 
 ```bash
-npm install -g @badlogic/pi
+npm install -g @mariozechner/pi
 ```
 
 Or run directly with npx:
 ```bash
-npx @badlogic/pi
+npx @mariozechner/pi
 ```
 
 ## What This Is
