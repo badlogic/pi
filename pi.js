@@ -207,6 +207,7 @@ class PrimeIntellectCLI {
             console.error('  --context <size>   Context window: 4k, 8k, 16k, 32k, 64k, 128k or 4096, 8192, etc (default: model default)');
             console.error('  --memory <percent> GPU memory: 30%, 50%, 90% or 0.3, 0.5, 0.9 (default: 90%)');
             console.error('  --all-gpus         Use all GPUs with tensor parallelism (ignores --memory)');
+            console.error('  --debug            Enable debug logging for vLLM');
             console.error('  --vllm-args        Pass remaining args directly to vLLM (ignores other options)');
             console.error('');
             console.error('Examples:');
@@ -227,6 +228,7 @@ class PrimeIntellectCLI {
         let context = null;  // Changed to null - let vLLM use model default
         let memory = 0.9;
         let allGpus = false;
+        let debug = false;
         let vllmArgs = null;
 
         // Check for --vllm-args first
@@ -255,6 +257,9 @@ class PrimeIntellectCLI {
                         break;
                     case '--all-gpus':
                         allGpus = true;
+                        break;
+                    case '--debug':
+                        debug = true;
                         break;
                     default:
                         console.error(`Unknown option: ${args[i]}`);
@@ -294,11 +299,11 @@ class PrimeIntellectCLI {
 
         // If vllmArgs provided, use raw vLLM command
         if (vllmArgs) {
-            await this.startRaw(modelId, name, vllmArgs);
+            await this.startRaw(modelId, name, vllmArgs, debug);
         } else {
             // Call the original start method with positional args
             const contextStr = context ? context.toString() : null;
-            await this.start(modelId, name, contextStr, memory.toString(), { allGpus, gpuCount });
+            await this.start(modelId, name, contextStr, memory.toString(), { allGpus, gpuCount, debug });
         }
     }
 
@@ -343,6 +348,11 @@ class PrimeIntellectCLI {
         if (options.allGpus && options.gpuCount > 1) {
             args += ` ${options.gpuCount}`; // Pass tensor parallel size
         }
+        
+        // Add debug logging if requested
+        if (options.debug) {
+            envPrefix = 'VLLM_LOGGING_LEVEL=DEBUG ';
+        }
 
         const output = this.ssh(`${envPrefix}python3 vllm_manager.py start ${args}`);
 
@@ -383,14 +393,40 @@ class PrimeIntellectCLI {
             // Watch logs until startup complete
             await this.logs(modelName, true);  // autoExit = true for startup
 
-            // Show model info after automatic exit
+            // Warm up the model with a simple prompt
+            console.log('\nWarming up model...');
+            try {
+                const warmupUrl = `${url}/chat/completions`;
+                const warmupPayload = {
+                    model: modelId,
+                    messages: [{ role: 'user', content: 'Hi' }],
+                    max_tokens: 1,
+                    temperature: 0
+                };
+                
+                const warmupResponse = await fetch(warmupUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(warmupPayload)
+                });
+                
+                if (warmupResponse.ok) {
+                    console.log('✓ Model warmed up and ready!');
+                } else {
+                    console.log('⚠ Warmup failed, but model should still work');
+                }
+            } catch (e) {
+                console.log('⚠ Could not warm up model:', e.message);
+            }
+
+            // Show model info after warmup
             showModelInfo();
         } else {
             console.log(output);
         }
     }
 
-    async startRaw(modelId, name, vllmArgs) {
+    async startRaw(modelId, name, vllmArgs, debug = false) {
         // Check if name is already in use
         const runningModels = this.getRunningModels();
         if (runningModels[name]) {
@@ -403,7 +439,8 @@ class PrimeIntellectCLI {
 
         // Start vLLM with raw arguments - use base64 to safely pass complex args
         const base64Args = Buffer.from(vllmArgs).toString('base64');
-        const output = this.ssh(`python3 vllm_manager.py start_raw "${modelId}" "${name}" "${base64Args}"`);
+        const envPrefix = debug ? 'VLLM_LOGGING_LEVEL=DEBUG ' : '';
+        const output = this.ssh(`${envPrefix}python3 vllm_manager.py start_raw "${modelId}" "${name}" "${base64Args}"`);
 
         // Extract connection info from output
         const urlMatch = output.match(/URL: (http:\/\/[^\s]+)/);
@@ -440,7 +477,33 @@ class PrimeIntellectCLI {
             // Watch logs until startup complete
             await this.logs(name, true);  // autoExit = true for startup
 
-            // Show model info after automatic exit
+            // Warm up the model with a simple prompt
+            console.log('\nWarming up model...');
+            try {
+                const warmupUrl = `${url}/chat/completions`;
+                const warmupPayload = {
+                    model: modelId,
+                    messages: [{ role: 'user', content: 'Hi' }],
+                    max_tokens: 1,
+                    temperature: 0
+                };
+                
+                const warmupResponse = await fetch(warmupUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(warmupPayload)
+                });
+                
+                if (warmupResponse.ok) {
+                    console.log('✓ Model warmed up and ready!');
+                } else {
+                    console.log('⚠ Warmup failed, but model should still work');
+                }
+            } catch (e) {
+                console.log('⚠ Could not warm up model:', e.message);
+            }
+
+            // Show model info after warmup
             showModelInfo();
         } else {
             console.log(output);
@@ -724,6 +787,7 @@ class PrimeIntellectCLI {
         console.log('  --context <size>   Context window: 4k, 8k, 16k, 32k, 64k, 128k (default: model default)');
         console.log('  --memory <percent> GPU memory: 30%, 50%, 90% (default: 90%)');
         console.log('  --all-gpus         Use all GPUs with tensor parallelism');
+        console.log('  --debug            Enable debug logging for vLLM');
         console.log('  --vllm-args        Pass remaining args directly to vLLM\n');
         console.log('Utility:');
         console.log('  pi shell                           SSH into active pod');

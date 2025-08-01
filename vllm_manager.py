@@ -405,8 +405,12 @@ def main():
                 elif 'gpu_id' in info and info['gpu_id'] is not None:
                     print(f"  GPU:   {info['gpu_id']}")
                 print(f"  URL:   http://{host_ip}:{info['port']}/v1")
+                print(f"\n  Export for OpenAI clients:")
+                print(f"  export OPENAI_BASE_URL='http://{host_ip}:{info['port']}/v1'")
+                print(f"  export OPENAI_API_KEY='dummy'")
+                print(f"  export OPENAI_MODEL='{info['model_id']}'")
                 if 'log_file' in info:
-                    print(f"  Logs:  {info['log_file']}")
+                    print(f"\n  Logs:  {info['log_file']}")
     
     elif cmd == "start":
         if len(sys.argv) < 3:

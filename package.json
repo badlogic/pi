@@ -1,6 +1,6 @@
 {
   "name": "@mariozechner/pi",
-  "version": "0.1.5",
+  "version": "0.1.8",
   "description": "CLI tool for managing vLLM deployments on GPU pods from Prime Intellect, Vast.ai, etc.",
   "main": "pi.js",
   "bin": {
