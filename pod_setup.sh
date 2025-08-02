@@ -3,8 +3,8 @@
 
 set -euo pipefail
 
-sudo apt update -y
-sudo apt install -y python3-pip python3-venv git build-essential cmake ninja-build curl
+apt update -y
+apt install -y python3-pip python3-venv git build-essential cmake ninja-build curl
 
 # --- Install uv (fast Python package manager) --------------------------------
 curl -LsSf https://astral.sh/uv/install.sh | sh

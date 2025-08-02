@@ -734,7 +734,9 @@ class PiCli {
 
         // Use a custom tail that watches for startup complete
         const pod = podName ? this.config.pods[podName] : this.getActivePod();
-        const sshCmd = `ssh ${pod.ssh} tail -n 50 -f ${logFile}`;
+        // Add SSH options to prevent connection issues
+        const sshOpts = '-o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes';
+        const sshCmd = `ssh ${sshOpts} ${pod.ssh} tail -n 50 -f ${logFile}`;
 
         return new Promise((resolve) => {
             const [cmd, ...args] = sshCmd.split(' ');
@@ -903,6 +905,178 @@ class PiCli {
         }
     }
 
+    async checkDownloads(podName = null, live = false) {
+        // Check only active pod or specified pod
+        const targetPod = podName || this.config.active;
+        if (!targetPod || !this.config.pods[targetPod]) {
+            console.error('No active pod. Run: pi setup <pod-name> <ssh_command>');
+            process.exit(1);
+        }
+
+        if (!live) {
+            // Single check mode
+            console.log(`Checking model downloads on pod: ${targetPod}\n`);
+            const output = this.ssh('python3 vllm_manager.py downloads', false, false, targetPod);
+            
+            if (output.includes('No HuggingFace cache found') || output.includes('No models in cache')) {
+                console.log(output);
+                return;
+            }
+            
+            // Parse and display
+            const downloadInfo = JSON.parse(output);
+            this._displayDownloadInfo(downloadInfo);
+        } else {
+            // Live streaming mode
+            const pod = this.config.pods[targetPod];
+            // Build SSH command with proper shell invocation
+            const sshParts = pod.ssh.split(' ');
+            const remoteCmd = 'source .pirc && python3 vllm_manager.py downloads --stream';
+            
+            return new Promise((resolve) => {
+                const proc = spawn('ssh', [...sshParts, remoteCmd], { stdio: ['inherit', 'pipe', 'pipe'] });
+                
+                let buffer = '';
+                
+                // Handle Ctrl+C gracefully
+                process.on('SIGINT', () => {
+                    console.log('\n\nStopping download monitor...');
+                    proc.kill('SIGTERM');  // Send SIGTERM to remote process
+                    setTimeout(() => {
+                        proc.kill('SIGKILL');  // Force kill if not terminated
+                        process.exit(0);
+                    }, 1000);
+                });
+                
+                // Print header once
+                console.log(`Monitoring model downloads on pod: ${targetPod} (Press Ctrl+C to stop)`);
+                console.log(); // Empty line after header
+                
+                // Hide cursor
+                process.stdout.write('\x1B[?25l');
+                
+                // Ensure cursor is shown again on exit
+                const cleanup = () => {
+                    process.stdout.write('\x1B[?25h');
+                };
+                process.on('exit', cleanup);
+                process.on('SIGINT', cleanup);
+                
+                let previousLineCount = 0;
+                
+                proc.stdout.on('data', (data) => {
+                    buffer += data.toString();
+                    
+                    // Process complete lines
+                    const lines = buffer.split('\n');
+                    buffer = lines[lines.length - 1];  // Keep incomplete line in buffer
+                    
+                    for (let i = 0; i < lines.length - 1; i++) {
+                        const line = lines[i].trim();
+                        if (line) {
+                            try {
+                                const downloadInfo = JSON.parse(line);
+                                
+                                // If we printed lines before, move cursor back up
+                                if (previousLineCount > 0) {
+                                    process.stdout.write(`\x1B[${previousLineCount}A`); // Move up N lines
+                                    process.stdout.write('\x1B[0J'); // Clear from cursor to end of screen
+                                }
+                                
+                                // Build all output as a single string
+                                let output = '';
+                                const addLine = (text = '') => {
+                                    output += text + '\n';
+                                };
+                                
+                                if (downloadInfo.status === 'NO_CACHE' || downloadInfo.status === 'NO_MODELS') {
+                                    addLine(downloadInfo.message);
+                                } else {
+                                    // Build the display output
+                                    for (const model of downloadInfo.models) {
+                                        addLine(`Model: ${model.model}`);
+                                        addLine(`  Size: ${model.size_gb}GB`);
+                                        
+                                        if (model.total_files > 0) {
+                                            const percentage = Math.round((model.files / model.total_files) * 100);
+                                            addLine(`  Files: ${model.files}/${model.total_files} (${percentage}%)`);
+                                            
+                                            // Show progress bar
+                                            const barLength = 30;
+                                            const filled = Math.round((percentage / 100) * barLength);
+                                            const empty = barLength - filled;
+                                            const progressBar = '█'.repeat(filled) + '░'.repeat(empty);
+                                            addLine(`  Progress: [${progressBar}] ${percentage}%`);
+                                        } else {
+                                            addLine(`  Files: ${model.files}`);
+                                        }
+                                        
+                                        addLine(`  Status: ${model.active ? '⏬ Downloading' : '⏸ Idle'}`);
+                                        addLine(); // Empty line between models
+                                    }
+                                    
+                                    if (downloadInfo.vllm_processes > 0) {
+                                        addLine(`Active vLLM processes: ${downloadInfo.vllm_processes}`);
+                                    }
+                                    
+                                    addLine();
+                                    addLine(`Last updated: ${new Date().toLocaleTimeString()}`);
+                                }
+                                
+                                // Write all output at once and count lines
+                                process.stdout.write(output);
+                                previousLineCount = (output.match(/\n/g) || []).length;
+                                
+                            } catch (e) {
+                                // Not JSON, just display as is
+                                console.log(line);
+                            }
+                        }
+                    }
+                });
+                
+                proc.stderr.on('data', (data) => {
+                    process.stderr.write(data);
+                });
+                
+                proc.on('close', () => {
+                    cleanup(); // Restore cursor
+                    resolve();
+                });
+            });
+        }
+    }
+    
+    _displayDownloadInfo(downloadInfo) {
+        for (const model of downloadInfo.models) {
+            console.log(`\nModel: ${model.model}`);
+            console.log(`  Size: ${model.size_gb}GB`);
+            
+            if (model.total_files > 0) {
+                const percentage = Math.round((model.files / model.total_files) * 100);
+                console.log(`  Files: ${model.files}/${model.total_files} (${percentage}%)`);
+                
+                // Show progress bar
+                const barLength = 30;
+                const filled = Math.round((percentage / 100) * barLength);
+                const empty = barLength - filled;
+                const progressBar = '█'.repeat(filled) + '░'.repeat(empty);
+                console.log(`  Progress: [${progressBar}] ${percentage}%`);
+            } else {
+                console.log(`  Files: ${model.files}`);
+            }
+            
+            console.log(`  Status: ${model.active ? '⏬ Downloading' : '⏸ Idle'}`);
+        }
+        
+        if (downloadInfo.vllm_processes > 0) {
+            console.log(`\nActive vLLM processes: ${downloadInfo.vllm_processes}`);
+        }
+        
+        // Show timestamp
+        console.log(`\nLast updated: ${new Date().toLocaleTimeString()}`);
+    }
+
     async prompt(name, message, podName = null) {
         // Get model info
         const models = this.getRunningModels(podName);
@@ -956,7 +1130,8 @@ class PiCli {
         console.log('  pi start <model> [options]         Start a model');
         console.log('  pi stop [name] [--pod <pod-name>] Stop a model (or all if no name)');
         console.log('  pi logs <name> [--pod <pod-name>] View model logs');
-        console.log('  pi prompt <name> <msg> [--pod <pod-name>] Chat with a model\n');
+        console.log('  pi prompt <name> <msg> [--pod <pod-name>] Chat with a model');
+        console.log('  pi downloads [--pod <pod-name>] [--live]   Check model download progress (--live for continuous monitoring)\n');
         console.log('Start Options:');
         console.log('  --name <name>      Model alias (default: auto-generated)');
         console.log('  --context <size>   Context window: 4k, 8k, 16k, 32k, 64k, 128k (default: model default)');
@@ -1081,6 +1256,25 @@ class PiCli {
                 }
                 await this.searchModels(args[0]);
                 break;
+
+            case 'downloads': {
+                let podName = null;
+                let live = false;
+                
+                // Parse --pod parameter
+                const podIndex = args.indexOf('--pod');
+                if (podIndex !== -1 && args[podIndex + 1]) {
+                    podName = args[podIndex + 1];
+                }
+                
+                // Parse --live parameter
+                if (args.includes('--live')) {
+                    live = true;
+                }
+                
+                await this.checkDownloads(podName, live);
+                break;
+            }
 
             case 'start':
                 await this.handleStart(args);

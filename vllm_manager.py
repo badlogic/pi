@@ -197,7 +197,7 @@ class VLLMManager:
         # Start vLLM (use venv python if available)
         python_cmd = str(Path.home() / "vllm_env/bin/python3") if (Path.home() / "vllm_env/bin/python3").exists() else "python3"
         cmd = [
-            python_cmd, "-m", "vllm.entrypoints.openai.api_server",
+            python_cmd, "-u", "-m", "vllm.entrypoints.openai.api_server",
             "--model", model_id,
             "--host", "0.0.0.0",
             "--port", str(port),
@@ -303,7 +303,7 @@ class VLLMManager:
         python_cmd = str(Path.home() / "vllm_env/bin/python3") if (Path.home() / "vllm_env/bin/python3").exists() else "python3"
         
         # Base command - ensure vllm_args is properly quoted
-        cmd = f'{python_cmd} -m vllm.entrypoints.openai.api_server --model "{model_id}" --host 0.0.0.0 --port {port} {vllm_args}'
+        cmd = f'{python_cmd} -u -m vllm.entrypoints.openai.api_server --model "{model_id}" --host 0.0.0.0 --port {port} {vllm_args}'
         
         # Use environment as-is (already configured by .pirc)
         env = os.environ.copy()
@@ -398,6 +398,71 @@ class VLLMManager:
         with open(log_file, 'r') as f:
             all_lines = f.readlines()
             return ''.join(all_lines[-lines:])
+    
+    def check_downloads(self):
+        """Check model download progress in HuggingFace cache"""
+        import glob
+        import re
+        
+        cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        if not cache_dir.exists():
+            return {"status": "NO_CACHE"}
+        
+        model_dirs = list(cache_dir.glob("models--*"))
+        if not model_dirs:
+            return {"status": "NO_MODELS"}
+        
+        results = []
+        
+        for model_dir in model_dirs:
+            # Extract model name
+            model_name = model_dir.name.replace("models--", "").replace("--", "/")
+            
+            # Get size
+            total_size = 0
+            for f in model_dir.rglob("*"):
+                if f.is_file():
+                    total_size += f.stat().st_size
+            size_gb = total_size / (1024**3)
+            
+            # Count safetensors files
+            safetensors_files = list(model_dir.rglob("*.safetensors"))
+            file_count = len(safetensors_files)
+            
+            # Get total expected files from filename pattern
+            total_files = 0
+            for f in safetensors_files:
+                match = re.search(r'model-\d+-of-(\d+)\.safetensors', f.name)
+                if match:
+                    total_files = max(total_files, int(match.group(1)))
+            
+            # Check if actively downloading (check if any partial files exist)
+            partial_files = list(model_dir.rglob("*.part"))
+            is_active = len(partial_files) > 0
+            
+            results.append({
+                "model": model_name,
+                "size_gb": round(size_gb, 1),
+                "files": file_count,
+                "total_files": total_files,
+                "active": is_active
+            })
+        
+        # Count vLLM processes
+        vllm_count = 0
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmdline = ' '.join(proc.info['cmdline'] or [])
+                if 'python' in cmdline and 'vllm' in cmdline and 'vllm_manager.py' not in cmdline:
+                    vllm_count += 1
+            except:
+                pass
+        
+        return {
+            "status": "OK",
+            "models": results,
+            "vllm_processes": vllm_count
+        }
 
 def main():
     import sys
@@ -405,7 +470,7 @@ def main():
     manager = VLLMManager()
     
     if len(sys.argv) < 2:
-        print("Usage: vllm_manager.py [list|start|stop|logs] ...")
+        print("Usage: vllm_manager.py [list|start|stop|logs|downloads] ...")
         sys.exit(1)
     
     cmd = sys.argv[1]
@@ -527,6 +592,46 @@ def main():
             print(f"No logs found for {name}")
         else:
             print(logs, end='')
+    
+    elif cmd == "downloads":
+        # Check if --stream flag is provided
+        stream = len(sys.argv) > 2 and sys.argv[2] == "--stream"
+        
+        if stream:
+            # Streaming mode - continuously output status
+            import time
+            import signal
+            
+            # Handle SIGTERM/SIGINT for clean shutdown
+            def signal_handler(sig, frame):
+                sys.exit(0)
+            
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            
+            while True:
+                download_info = manager.check_downloads()
+                
+                if download_info["status"] == "NO_CACHE":
+                    print(json.dumps({"status": "NO_CACHE", "message": "No HuggingFace cache found"}))
+                elif download_info["status"] == "NO_MODELS":
+                    print(json.dumps({"status": "NO_MODELS", "message": "No models in cache"}))
+                else:
+                    print(json.dumps(download_info))
+                
+                sys.stdout.flush()  # Force flush to ensure output is sent
+                time.sleep(2)  # Update every 2 seconds
+        else:
+            # Single check mode
+            download_info = manager.check_downloads()
+            
+            if download_info["status"] == "NO_CACHE":
+                print("No HuggingFace cache found")
+            elif download_info["status"] == "NO_MODELS":
+                print("No models in cache")
+            else:
+                # Output as JSON for easy parsing
+                print(json.dumps(download_info))
     
     else:
         print(f"Unknown command: {cmd}")

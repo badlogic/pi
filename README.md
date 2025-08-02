@@ -154,6 +154,7 @@ pi start <model> [options]           # Start a model with options
 pi stop [name]                       # Stop a model (or all if no name)
 pi logs <name>                       # View logs with tail -f
 pi prompt <name> "message"           # Quick test prompt
+pi downloads [--live]                # Check model download progress (--live for continuous monitoring)
 ```
 
 All model management commands support the `--pod` parameter to target a specific pod without switching the active pod.
@@ -348,6 +349,33 @@ The tool automatically detects the model and tries to use an appropriate parser:
 
 Remember: Tool calling is still an evolving feature in the LLM ecosystem. What works today might break tomorrow with a model update.
 
+## Monitoring Downloads
+
+Use `pi downloads` to check the progress of model downloads in the HuggingFace cache:
+
+```bash
+pi downloads                         # Check downloads on active pod
+pi downloads --live                  # Live monitoring (updates every 2 seconds)
+pi downloads --pod 8h200            # Check downloads on specific pod
+pi downloads --live --pod 8h200     # Live monitoring on specific pod
+```
+
+The command shows:
+- Model name and current size
+- Download progress (files downloaded / total files)
+- Download status (⏬ Downloading or ⏸ Idle)
+- Estimated total size (if available from HuggingFace)
+
+**Tip for large models**: When starting models like Qwen-480B that take time to download, run `pi start` in one terminal and `pi downloads --live` in another to monitor progress. This is especially helpful since the log output during downloads can be minimal.
+
+**Downloads stalled?** If downloads appear stuck (e.g., at 92%), you can safely stop and restart:
+```bash
+pi stop <model-name>         # Stop the current process
+pi downloads                 # Verify progress (e.g., 45/49 files)
+pi start <same-command>      # Restart with the same command
+```
+vLLM will automatically use the already-downloaded files and continue from where it left off. This often resolves network or CDN throttling issues.
+
 ## Troubleshooting
 
 - **OOM Errors**: Reduce gpu_fraction or use a smaller model
@@ -365,10 +393,6 @@ Remember: Tool calling is still an evolving feature in the LLM ecosystem. What w
   1. Check if GPUs are full with other models: `pi ssh "nvidia-smi"`
   2. If memory is insufficient, make room by stopping running models: `pi stop <model_name>`
   3. If the error persists with sufficient memory, copy the error output and feed it to an LLM for troubleshooting assistance
-- **Large Model Loading Crashes**: When loading very large models (e.g., Qwen3-Coder 480B), the process may crash after downloading weights:
-  1. This often happens during the tensor loading phase after successful download
-  2. Simply restart the model - cached weights will be reused: `pi start <same command>`
-  3. The second attempt is much faster since downloads are already cached in `~/.cache/huggingface/`
 
 ## Timing notes
 - 8x B200 on DataCrunch, Spot instance
