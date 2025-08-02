@@ -1,18 +1,83 @@
 #!/usr/bin/env bash
-# GPU pod bootstrap: Ubuntu 22.04 + CUDA 12.6/12.8, vLLM latest, FlashInfer w/ TRT kernels (sm70-120)
+# GPU pod bootstrap: Ubuntu 20.04/22.04/24.04 + dynamic CUDA toolkit, vLLM latest, FlashInfer
 
 set -euo pipefail
 
 apt update -y
-apt install -y python3-pip python3-venv git build-essential cmake ninja-build curl
+apt install -y python3-pip python3-venv git build-essential cmake ninja-build curl wget lsb-release htop
+
+# --- Install matching CUDA toolkit -------------------------------------------
+echo "Checking CUDA driver version..."
+DRIVER_CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}')
+echo "Driver supports CUDA: $DRIVER_CUDA_VERSION"
+
+# Check if nvcc exists and its version
+if command -v nvcc &> /dev/null; then
+    NVCC_VERSION=$(nvcc --version | grep "release" | awk '{print $6}' | cut -d, -f1)
+    echo "Current nvcc version: $NVCC_VERSION"
+else
+    NVCC_VERSION="none"
+    echo "nvcc not found"
+fi
+
+# Install CUDA toolkit matching driver version if needed
+if [[ "$NVCC_VERSION" != "$DRIVER_CUDA_VERSION" ]]; then
+    echo "Installing CUDA Toolkit $DRIVER_CUDA_VERSION to match driver..."
+    
+    # Detect Ubuntu version
+    UBUNTU_VERSION=$(lsb_release -rs)
+    UBUNTU_CODENAME=$(lsb_release -cs)
+    
+    echo "Detected Ubuntu $UBUNTU_VERSION ($UBUNTU_CODENAME)"
+    
+    # Map Ubuntu version to NVIDIA repo path
+    if [[ "$UBUNTU_VERSION" == "24.04" ]]; then
+        REPO_PATH="ubuntu2404"
+    elif [[ "$UBUNTU_VERSION" == "22.04" ]]; then
+        REPO_PATH="ubuntu2204"
+    elif [[ "$UBUNTU_VERSION" == "20.04" ]]; then
+        REPO_PATH="ubuntu2004"
+    else
+        echo "Warning: Unsupported Ubuntu version $UBUNTU_VERSION, trying ubuntu2204"
+        REPO_PATH="ubuntu2204"
+    fi
+    
+    # Add NVIDIA package repositories
+    wget https://developer.download.nvidia.com/compute/cuda/repos/${REPO_PATH}/x86_64/cuda-keyring_1.1-1_all.deb
+    dpkg -i cuda-keyring_1.1-1_all.deb
+    rm cuda-keyring_1.1-1_all.deb
+    apt-get update
+    
+    # Install specific CUDA toolkit version
+    # Convert version format (12.9 -> 12-9)
+    CUDA_VERSION_APT=$(echo $DRIVER_CUDA_VERSION | sed 's/\./-/')
+    echo "Installing cuda-toolkit-${CUDA_VERSION_APT}..."
+    apt-get install -y cuda-toolkit-${CUDA_VERSION_APT}
+    
+    # Add CUDA to PATH
+    export PATH=/usr/local/cuda-${DRIVER_CUDA_VERSION}/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:$LD_LIBRARY_PATH
+    
+    # Verify installation
+    nvcc --version
+else
+    echo "CUDA toolkit $NVCC_VERSION matches driver version"
+fi
 
 # --- Install uv (fast Python package manager) --------------------------------
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
+# --- Install Python 3.13 if not available ------------------------------------
+if ! command -v python3.13 &> /dev/null; then
+    echo "Python 3.13 not found. Installing via uv..."
+    # Let uv handle Python installation - it can download and install Python
+    uv python install 3.13
+fi
+
 # --- Create and activate venv ------------------------------------------------
 VENV="$HOME/vllm_env"
-uv venv --python 3.12 --seed "$VENV"
+uv venv --python 3.13 --seed "$VENV"
 source "$VENV/bin/activate"
 
 # --- Install vLLM with automatic PyTorch selection ---------------------------
@@ -46,7 +111,8 @@ touch ~/.config/vllm/do_not_track
 cat > ~/.pirc <<EOF
 # auto-sourced env
 [ -d "$HOME/vllm_env" ] && source "$HOME/vllm_env/bin/activate"
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/bin:$HOME/.local/bin:$PATH"
+export LD_LIBRARY_PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:$LD_LIBRARY_PATH"
 export VLLM_ATTENTION_BACKEND=${ATTENTION_BACKEND}
 export VLLM_USE_FLASHINFER_SAMPLER=1
 export VLLM_USE_DEEP_GEMM=1
