@@ -80,10 +80,19 @@ VENV="$HOME/vllm_env"
 uv venv --python 3.13 --seed "$VENV"
 source "$VENV/bin/activate"
 
-# --- Install vLLM with automatic PyTorch selection ---------------------------
-echo "Installing vLLM with automatic CUDA/PyTorch detection..."
-# uv automatically selects the right PyTorch based on CUDA version
-uv pip install vllm --torch-backend=auto
+# --- Install vLLM from source with automatic PyTorch selection ---------------
+echo "Installing PyTorch with automatic CUDA detection..."
+uv pip install torch --torch-backend=auto
+
+echo "Installing vLLM from source for GLM-4.5 support..."
+cd /tmp
+rm -rf vllm
+git clone https://github.com/vllm-project/vllm.git
+cd vllm
+python use_existing_torch.py
+uv pip install -r requirements/build.txt
+uv pip install --no-build-isolation -e .
+cd ~
 
 # --- Install additional packages ---------------------------------------------
 echo "Installing additional packages..."
@@ -112,7 +121,7 @@ cat > ~/.pirc <<EOF
 # auto-sourced env
 [ -d "$HOME/vllm_env" ] && source "$HOME/vllm_env/bin/activate"
 export PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/bin:$HOME/.local/bin:$PATH"
-export LD_LIBRARY_PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:\${LD_LIBRARY_PATH:-}"
 export VLLM_ATTENTION_BACKEND=${ATTENTION_BACKEND}
 export VLLM_USE_FLASHINFER_SAMPLER=1
 export VLLM_USE_DEEP_GEMM=1
