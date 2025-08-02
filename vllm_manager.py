@@ -404,9 +404,16 @@ class VLLMManager:
         import glob
         import re
         
-        cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        # Respect HuggingFace environment variables
+        if os.environ.get('HUGGINGFACE_HUB_CACHE'):
+            cache_dir = Path(os.environ['HUGGINGFACE_HUB_CACHE'])
+        elif os.environ.get('HF_HOME'):
+            cache_dir = Path(os.environ['HF_HOME']) / "hub"
+        else:
+            cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        
         if not cache_dir.exists():
-            return {"status": "NO_CACHE"}
+            return {"status": "NO_CACHE", "cache_dir": str(cache_dir)}
         
         model_dirs = list(cache_dir.glob("models--*"))
         if not model_dirs:
@@ -418,27 +425,41 @@ class VLLMManager:
             # Extract model name
             model_name = model_dir.name.replace("models--", "").replace("--", "/")
             
-            # Get size
+            # Get size (only count actual blob files, not symlinks)
             total_size = 0
-            for f in model_dir.rglob("*"):
-                if f.is_file():
-                    total_size += f.stat().st_size
+            blobs_dir = model_dir / "blobs"
+            if blobs_dir.exists():
+                for f in blobs_dir.iterdir():
+                    if f.is_file() and not f.name.endswith('.incomplete'):
+                        total_size += f.stat().st_size
             size_gb = total_size / (1024**3)
             
-            # Count safetensors files
-            safetensors_files = list(model_dir.rglob("*.safetensors"))
-            file_count = len(safetensors_files)
+            # Count safetensors files in blobs directory (actual files)
+            safetensors_count = 0
+            snapshots_dir = model_dir / "snapshots"
+            if snapshots_dir.exists():
+                for snapshot in snapshots_dir.iterdir():
+                    if snapshot.is_dir():
+                        safetensors_count = len(list(snapshot.glob("*.safetensors")))
+                        break  # Use first snapshot
+            file_count = safetensors_count
             
             # Get total expected files from filename pattern
             total_files = 0
-            for f in safetensors_files:
-                match = re.search(r'model-\d+-of-(\d+)\.safetensors', f.name)
-                if match:
-                    total_files = max(total_files, int(match.group(1)))
+            if snapshots_dir.exists():
+                for snapshot in snapshots_dir.iterdir():
+                    if snapshot.is_dir():
+                        for f in snapshot.glob("*.safetensors"):
+                            match = re.search(r'model-\d+-of-(\d+)\.safetensors', f.name)
+                            if match:
+                                total_files = max(total_files, int(match.group(1)))
+                        break  # Only check first snapshot
             
-            # Check if actively downloading (check if any partial files exist)
-            partial_files = list(model_dir.rglob("*.part"))
-            is_active = len(partial_files) > 0
+            # Check if actively downloading (check if any incomplete files exist in blobs)
+            incomplete_files = []
+            if blobs_dir.exists():
+                incomplete_files = list(blobs_dir.glob("*.incomplete"))
+            is_active = len(incomplete_files) > 0
             
             results.append({
                 "model": model_name,

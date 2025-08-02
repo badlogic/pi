@@ -22,7 +22,7 @@ uv pip install vllm --torch-backend=auto
 
 # --- Install additional packages ---------------------------------------------
 echo "Installing additional packages..."
-uv pip install huggingface-hub psutil tensorrt
+uv pip install huggingface-hub psutil tensorrt hf_transfer
 
 # --- FlashInfer installation (optional, improves performance) ----------------
 echo "Attempting FlashInfer installation (optional)..."
@@ -55,6 +55,20 @@ export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export HF_TOKEN=${HF_TOKEN}
 export HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+export HF_HUB_ENABLE_HF_TRANSFER=1
 EOF
+
+# --- RunPod specific setup ---------------------------------------------------
+if df -h | grep -q "runpod.net.*workspace"; then
+    echo "Detected RunPod instance - setting up workspace symlink..."
+    if [ ! -L ~/.cache/huggingface ]; then
+        mkdir -p /workspace/cache/huggingface
+        rm -rf ~/.cache/huggingface 2>/dev/null || true
+        ln -s /workspace/cache/huggingface ~/.cache/huggingface
+        echo "Created symlink: ~/.cache/huggingface -> /workspace/cache/huggingface"
+    else
+        echo "Symlink already exists"
+    fi
+fi
 
 echo "=== DONE ==="
