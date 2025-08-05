@@ -133,17 +133,63 @@ export HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
 export HF_HUB_ENABLE_HF_TRANSFER=1
 EOF
 
-# --- RunPod specific setup ---------------------------------------------------
-if df -h | grep -q "runpod.net.*workspace"; then
-    echo "Detected RunPod instance - setting up workspace symlink..."
-    if [ ! -L ~/.cache/huggingface ]; then
-        mkdir -p /workspace/cache/huggingface
-        rm -rf ~/.cache/huggingface 2>/dev/null || true
-        ln -s /workspace/cache/huggingface ~/.cache/huggingface
-        echo "Created symlink: ~/.cache/huggingface -> /workspace/cache/huggingface"
-    else
-        echo "Symlink already exists"
-    fi
+# --- Model storage setup (REQUIRED) ------------------------------------------
+if [ -z "${MODELS_PATH:-}" ]; then
+    echo "ERROR: MODELS_PATH environment variable is required but not set"
+    echo "This should be set by the pi CLI during setup"
+    exit 1
+fi
+
+echo ""
+echo "=== Setting up model storage ==="
+echo "Storage path: $MODELS_PATH"
+
+# Check if the path exists and is writable
+if [ ! -d "$MODELS_PATH" ]; then
+    echo "ERROR: Model storage path does not exist: $MODELS_PATH"
+    echo ""
+    echo "Common issues:"
+    echo "  • Network volume not mounted"
+    echo "  • Incorrect path specified"
+    echo "  • Permission denied"
+    echo ""
+    echo "Please verify the path exists and is writable, then run setup again"
+    exit 1
+fi
+
+if [ ! -w "$MODELS_PATH" ]; then
+    echo "ERROR: Model storage path is not writable: $MODELS_PATH"
+    echo "Please check permissions"
+    exit 1
+fi
+
+# Create the huggingface cache directory structure in the models path
+mkdir -p "${MODELS_PATH}/huggingface/hub"
+
+# Remove any existing cache directory or symlink
+if [ -e ~/.cache/huggingface ] || [ -L ~/.cache/huggingface ]; then
+    echo "Removing existing ~/.cache/huggingface..."
+    rm -rf ~/.cache/huggingface 2>/dev/null || true
+fi
+
+# Create parent directory if needed
+mkdir -p ~/.cache
+
+# Create symlink from ~/.cache/huggingface to the models path
+ln -s "${MODELS_PATH}/huggingface" ~/.cache/huggingface
+echo "Created symlink: ~/.cache/huggingface -> ${MODELS_PATH}/huggingface"
+
+# Verify the symlink works
+if [ -d ~/.cache/huggingface/hub ]; then
+    echo "✓ Model storage configured successfully"
+    
+    # Check available space
+    AVAILABLE_SPACE=$(df -h "$MODELS_PATH" | awk 'NR==2 {print $4}')
+    echo "Available space: $AVAILABLE_SPACE"
+else
+    echo "ERROR: Could not verify model storage setup"
+    echo "The symlink was created but the target directory is not accessible"
+    exit 1
 fi
 
 echo "=== DONE ==="

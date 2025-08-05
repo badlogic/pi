@@ -116,10 +116,26 @@ class PiCli {
         }
     }
 
-    async setup(podName, sshCommand) {
-        if (!podName || !sshCommand) {
-            console.error('Usage: pi setup <pod-name> <ssh_command>');
-            console.error('Example: pi setup prod "root@135.181.71.41 -p 22"');
+    async setup(podName, sshCommand, modelsPath) {
+        if (!podName || !sshCommand || !modelsPath) {
+            console.error('\n❌ ERROR: Missing required parameters\n');
+            console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path>');
+            console.error('');
+            console.error('The --models-path parameter is REQUIRED to specify where models will be stored.');
+            console.error('This should be a persistent volume that survives pod restarts.\n');
+            console.error('Common paths by provider:');
+            console.error('  • RunPod:       --models-path /workspace          (pod-specific storage)');
+            console.error('  • RunPod:       --models-path /runpod-volume      (network volume)');
+            console.error('  • Vast.ai:      --models-path /workspace');
+            console.error('  • DataCrunch:   --models-path /data');
+            console.error('  • Lambda Labs:  --models-path /persistent');
+            console.error('  • AWS:          --models-path /mnt/efs            (EFS mount)');
+            console.error('  • Custom:       --models-path /your/mount/path\n');
+            console.error('Examples:');
+            console.error('  pi setup prod "root@135.181.71.41 -p 22" --models-path /workspace');
+            console.error('  pi setup h200 "root@gpu.vast.ai -p 22" --models-path /workspace');
+            console.error('  pi setup dev "ubuntu@ec2.aws.com" --models-path /mnt/efs\n');
+            console.error('💡 TIP: Use network volumes when available for sharing models between pods');
             process.exit(1);
         }
 
@@ -152,7 +168,7 @@ class PiCli {
         this.scp(path.join(SCRIPT_DIR, 'pod_setup.sh'));
         this.scp(path.join(SCRIPT_DIR, 'vllm_manager.py'));
 
-        // Run setup with HF_TOKEN
+        // Run setup with HF_TOKEN and optional models path
         console.log('\nRunning setup script...');
         const hfToken = process.env.HF_TOKEN;
         if (!hfToken) {
@@ -160,7 +176,10 @@ class PiCli {
             console.error('Please export HF_TOKEN before running setup');
             process.exit(1);
         }
-        await this.ssh(`export HF_TOKEN="${hfToken}" && bash pod_setup.sh`, true, true);
+        
+        // Pass models path as environment variable
+        const envVars = [`HF_TOKEN="${hfToken}"`, `MODELS_PATH="${modelsPath}"`];
+        await this.ssh(`export ${envVars.join(' ')} && bash pod_setup.sh`, true, true);
 
         console.log('\n✓ Setup complete!');
 
@@ -1120,7 +1139,9 @@ class PiCli {
         console.log('\npi CLI\n');
 
         console.log('Pod Management:');
-        console.log('  pi setup <pod-name> <ssh_command>  Configure and activate a pod');
+        console.log('  pi setup <pod-name> <ssh_command> --models-path <path>');
+        console.log('                                      Configure and activate a pod');
+        console.log('                                      --models-path: REQUIRED persistent storage path');
         console.log('  pi pods                            List all pods (active pod marked)');
         console.log('  pi pod <pod-name>                  Switch active pod');
         console.log('  pi pod remove <pod-name>           Remove pod from config\n');
@@ -1207,14 +1228,38 @@ class PiCli {
 
         switch (command) {
             case 'setup': {
-                if (args.length < 2) {
-                    console.error('Usage: pi setup <pod-name> <ssh_command>');
-                    console.error('Example: pi setup prod "root@135.181.71.41 -p 22"');
+                if (args.length < 4) {
+                    console.error('\n❌ ERROR: Missing required parameters\n');
+                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path>');
+                    console.error('');
+                    console.error('The --models-path parameter is REQUIRED.');
+                    console.error('See common paths: pi setup (without arguments)\n');
                     process.exit(1);
                 }
                 const podName = args[0];
-                const sshCmd = args.slice(1).join(' ');
-                this.setup(podName, sshCmd);
+                
+                // Check for --models-path flag (now required)
+                const modelsPathIndex = args.indexOf('--models-path');
+                if (modelsPathIndex === -1 || !args[modelsPathIndex + 1]) {
+                    console.error('\n❌ ERROR: --models-path is required\n');
+                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path>');
+                    console.error('');
+                    console.error('Common paths by provider:');
+                    console.error('  • RunPod:       --models-path /workspace');
+                    console.error('  • Vast.ai:      --models-path /workspace');
+                    console.error('  • DataCrunch:   --models-path /data');
+                    console.error('  • Lambda Labs:  --models-path /persistent');
+                    console.error('  • AWS EFS:      --models-path /mnt/efs\n');
+                    process.exit(1);
+                }
+                
+                const modelsPath = args[modelsPathIndex + 1];
+                let sshArgs = args.slice(1);
+                // Remove --models-path and its value from the args
+                sshArgs.splice(modelsPathIndex - 1, 2);
+                
+                const sshCmd = sshArgs.join(' ');
+                this.setup(podName, sshCmd, modelsPath);
                 break;
             }
             case 'pods':

@@ -52,11 +52,12 @@ A simple CLI tool that automatically sets up and manages vLLM deployments on GPU
 # 1. Get a GPU pod from Prime Intellect
 #    Visit https://app.primeintellect.ai or https://vast.ai/ or https://datacrunch.io and create a pod (use Ubuntu 22+ image)
 #    Providers usually give you an SSH command with which to log into the machine. Copy that command.
+#    IMPORTANT: Note where your provider stores persistent data (e.g., /workspace, /data, etc.)
 
 # 2. On your local machine, run the following to setup the remote pod. The Hugging Face token
-#    is required for model download.
+#    is required for model download. The --models-path is REQUIRED and should point to persistent storage.
 export HF_TOKEN=your_huggingface_token
-pi setup my-pod-name "ssh root@135.181.71.41 -p 22"
+pi setup my-pod-name "ssh root@135.181.71.41 -p 22" --models-path /workspace
 
 # 3. Start a model (automatically manages GPU assignment)
 pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 20%
@@ -100,14 +101,40 @@ export OPENAI_API_KEY='dummy'
 
 ### Pod Management
 
-The tool supports managing multiple Prime Intellect pods from a single machine. Each pod is identified by a name you choose (e.g., "prod", "dev", "h200"). While all your pods continue running independently, the tool operates on one "active" pod at a time - all model commands (start, stop, list, etc.) are directed to this active pod. You can easily switch which pod is active to manage models on different machines.
+The tool supports managing multiple GPU pods from a single machine. Each pod is identified by a name you choose (e.g., "prod", "dev", "h200"). While all your pods continue running independently, the tool operates on one "active" pod at a time - all model commands (start, stop, list, etc.) are directed to this active pod. You can easily switch which pod is active to manage models on different machines.
 
 ```bash
-pi setup <pod-name> "<ssh_command>"  # Configure and activate a pod
-pi pods                              # List all pods (active pod marked)
-pi pod <pod-name>                    # Switch active pod
-pi pod remove <pod-name>             # Remove pod from config
-pi shell                             # SSH into active pod
+pi setup <pod-name> "<ssh_command>" --models-path <path>  # Configure and activate a pod
+pi pods                                                   # List all pods (active pod marked)
+pi pod <pod-name>                                        # Switch active pod
+pi pod remove <pod-name>                                 # Remove pod from config
+pi shell                                                 # SSH into active pod
+```
+
+#### Model Storage Paths by Provider
+
+The `--models-path` parameter is **REQUIRED** and should point to persistent storage that survives pod restarts:
+
+| Provider | Recommended Path | Type | Notes |
+|----------|-----------------|------|-------|
+| **RunPod** | `/workspace` | Pod storage | Persists for pod lifetime |
+| **RunPod** | `/runpod-volume` | Network volume | Shared across pods (if configured) |
+| **Vast.ai** | `/workspace` | Instance storage | Check your instance details |
+| **DataCrunch** | `/data` | Persistent storage | Usually pre-mounted |
+| **Lambda Labs** | `/persistent` | Persistent storage | Check instance config |
+| **AWS** | `/mnt/efs` | EFS mount | Configure EFS first |
+| **Custom** | `/your/path` | Your mount | Any persistent mount point |
+
+**Example setups:**
+```bash
+# RunPod with network volume
+pi setup runpod "root@123.45.67.89 -p 22" --models-path /runpod-volume
+
+# Vast.ai with workspace
+pi setup vast "root@vast.ai -p 22" --models-path /workspace
+
+# DataCrunch with data volume
+pi setup dc "ubuntu@dc.server.com" --models-path /data
 ```
 
 #### Working with Multiple Pods
@@ -160,6 +187,27 @@ pi downloads [--live]                # Check model download progress (--live for
 All model management commands support the `--pod` parameter to target a specific pod without switching the active pod.
 
 ## Examples
+
+### Running GPT-OSS Models
+
+OpenAI's GPT-OSS models are open-weight models optimized with MXFP4 quantization:
+
+```bash
+# GPT-OSS 20B - Fits on 16GB+ VRAM GPUs
+pi start openai/gpt-oss-20b --name gpt-oss-20b
+
+# GPT-OSS 120B - Needs 60GB+ VRAM (single H100 or multi-GPU)
+pi start openai/gpt-oss-120b --name gpt-oss-120b --all-gpus
+
+# With custom context and memory settings
+pi start openai/gpt-oss-20b --name gpt-oss --context 32k --memory 50%
+```
+
+Both models support:
+- Chat completions API
+- Responses API (OpenAI's new format)
+- Tool calling (function calling)
+- Browsing capabilities
 
 ### Search for models
 ```bash
