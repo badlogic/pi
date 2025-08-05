@@ -77,6 +77,14 @@ fi
 
 # --- Create and activate venv ------------------------------------------------
 VENV="$HOME/vllm_env"
+
+# Remove existing venv if it exists for a clean installation
+if [ -d "$VENV" ]; then
+    echo "Removing existing virtual environment..."
+    rm -rf "$VENV"
+fi
+
+echo "Creating fresh virtual environment..."
 uv venv --python 3.12 --seed "$VENV"
 source "$VENV/bin/activate"
 
