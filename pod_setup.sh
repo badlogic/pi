@@ -4,7 +4,7 @@
 set -euo pipefail
 
 apt update -y
-apt install -y python3-pip python3-venv git build-essential cmake ninja-build curl wget lsb-release htop
+apt install -y python3-pip python3-venv git build-essential cmake ninja-build curl wget lsb-release htop pkg-config
 
 # --- Install matching CUDA toolkit -------------------------------------------
 echo "Checking CUDA driver version..."
@@ -68,30 +68,52 @@ fi
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
-# --- Install Python 3.13 if not available ------------------------------------
-if ! command -v python3.13 &> /dev/null; then
-    echo "Python 3.13 not found. Installing via uv..."
+# --- Install Python 3.12 if not available ------------------------------------
+if ! command -v python3.12 &> /dev/null; then
+    echo "Python 3.12 not found. Installing via uv..."
     # Let uv handle Python installation - it can download and install Python
-    uv python install 3.13
+    uv python install 3.12
 fi
 
 # --- Create and activate venv ------------------------------------------------
 VENV="$HOME/vllm_env"
-uv venv --python 3.13 --seed "$VENV"
+uv venv --python 3.12 --seed "$VENV"
 source "$VENV/bin/activate"
 
 # --- Install vLLM from source with automatic PyTorch selection ---------------
 echo "Installing PyTorch with automatic CUDA detection..."
-uv pip install torch --torch-backend=auto
+uv pip install torch --torch-backend=auto || {
+    echo "ERROR: Failed to install PyTorch"
+    exit 1
+}
 
 echo "Installing vLLM from source for GLM-4.5 support..."
 cd /tmp
 rm -rf vllm
-git clone https://github.com/vllm-project/vllm.git
+git clone https://github.com/vllm-project/vllm.git || {
+    echo "ERROR: Failed to clone vLLM repository"
+    exit 1
+}
 cd vllm
-python use_existing_torch.py
-uv pip install -r requirements/build.txt
-uv pip install --no-build-isolation -e .
+python use_existing_torch.py || {
+    echo "ERROR: Failed to prepare vLLM for installation"
+    exit 1
+}
+
+echo "Installing vLLM build requirements..."
+uv pip install -r requirements/build.txt || {
+    echo "ERROR: Failed to install build requirements"
+    exit 1
+}
+
+echo "Building and installing vLLM (this may take a while)..."
+uv pip install --no-build-isolation -e . || {
+    echo "WARNING: vLLM installation from source failed, trying pre-built version..."
+    uv pip install vllm || {
+        echo "ERROR: Failed to install vLLM"
+        exit 1
+    }
+}
 cd ~
 
 # --- Install additional packages ---------------------------------------------

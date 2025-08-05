@@ -227,9 +227,36 @@ class PiCli {
         
         // Pass models path as environment variable
         const envVars = [`HF_TOKEN="${hfToken}"`, `MODELS_PATH="${modelsPath}"`];
-        await this.ssh(`export ${envVars.join(' ')} && bash pod_setup.sh`, true, true);
-
-        console.log('\n✓ Setup complete!');
+        
+        try {
+            await this.ssh(`export ${envVars.join(' ')} && bash pod_setup.sh`, true, true);
+            
+            // Verify setup completed successfully by checking for vllm_env and psutil
+            console.log('\nVerifying setup...');
+            const verifyCmd = 'source ~/.pirc 2>/dev/null && python3 -c "import psutil, huggingface_hub, hf_transfer; print(\'✓ All required packages installed\')" 2>&1';
+            const verifyResult = this.ssh(verifyCmd, false, true);
+            
+            if (verifyResult.includes('✓ All required packages installed')) {
+                console.log(verifyResult.trim());
+                console.log('\n✓ Setup complete!');
+            } else {
+                console.error('\n⚠ Setup may have failed. Verification output:');
+                console.error(verifyResult);
+                console.error('\nYou may need to run setup again or manually install missing packages.');
+                console.error('To manually fix, run:');
+                console.error(`  pi ssh h100-dc "source ~/.pirc && pip install psutil huggingface-hub hf_transfer"`);
+            }
+        } catch (e) {
+            console.error('\n❌ Setup script failed!');
+            console.error('Error:', e.message);
+            console.error('\nCommon issues:');
+            console.error('  • Missing dependencies (pkg-config, etc)');
+            console.error('  • Python version incompatibility');
+            console.error('  • Network issues downloading packages');
+            console.error('\nTo debug, check the output above or run:');
+            console.error(`  pi ssh ${podName || this.config.active} "tail -100 /tmp/setup.log"`);
+            process.exit(1);
+        }
 
         // Show usage help
         this.showHelp();
