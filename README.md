@@ -111,9 +111,25 @@ pi pod remove <pod-name>                                                     # R
 pi shell                                                                     # SSH into active pod
 ```
 
+#### Why --models-path is Required
+
+The `--models-path` parameter is **REQUIRED** to ensure your downloaded models persist across pod restarts and can be shared between pods. Here's why this matters:
+
+1. **Avoid Re-downloading**: Large models (70B+) can take 30+ minutes to download. With persistent storage, download once and reuse.
+2. **Cost Efficiency**: No wasted GPU time re-downloading models every time you start a pod.
+3. **Pod Flexibility**: Switch between different GPU types or providers while keeping your model library.
+4. **Shared Model Library**: With network volumes, multiple pods can access the same models simultaneously.
+5. **Disaster Recovery**: If a pod crashes or gets terminated, your models are safe.
+
+Without persistent storage, models would be stored in the pod's ephemeral storage and lost when the pod stops, requiring re-download every time.
+
+**Example scenario**: Running Llama-3.1-70B (140GB download)
+- ❌ Without persistent storage: 30 min download every pod restart = $5-10 wasted GPU time per restart
+- ✅ With persistent storage: Download once, instant starts forever = Save hours and dollars
+
 #### Model Storage Paths by Provider
 
-The `--models-path` parameter is **REQUIRED** and should point to persistent storage that survives pod restarts:
+The `--models-path` should point to persistent storage that survives pod restarts:
 
 | Provider | Recommended Path | Type | Notes |
 |----------|-----------------|------|-------|
