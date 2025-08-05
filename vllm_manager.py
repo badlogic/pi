@@ -229,13 +229,13 @@ class VLLMManager:
         if tensor_parallel_size > 1:
             cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
         
-        # Special handling for GPT-OSS models - disable V1 engine due to FlashInfer compatibility issues
-        if 'gpt-oss' in model_id.lower():
-            cmd.append("--disable-v1")
-            print("Note: Disabling V1 engine for GPT-OSS model (FlashInfer compatibility)")
-        
         # Use environment as-is (already configured by .pirc)
         env = os.environ.copy()
+        
+        # Special handling for GPT-OSS models - use FLASH_ATTN instead of FlashInfer
+        if 'gpt-oss' in model_id.lower():
+            env['VLLM_ATTENTION_BACKEND'] = 'FLASH_ATTN'
+            print("Note: Using FLASH_ATTN backend for GPT-OSS model (FlashInfer compatibility issue)")
         
         # Handle GPU assignment
         assigned_gpu = None
