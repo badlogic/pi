@@ -156,7 +156,8 @@ echo "Attempting FlashInfer installation (optional)..."
 # Try the official FlashInfer package name
 if uv pip install flashinfer-python; then
     echo "FlashInfer installed successfully"
-    ATTENTION_BACKEND="FLASHINFER"
+    # Note: GPT-OSS models have issues with FlashInfer, so we always use FLASH_ATTN
+    ATTENTION_BACKEND="FLASH_ATTN"
 else
     echo "FlashInfer not available, using Flash Attention instead"
     ATTENTION_BACKEND="FLASH_ATTN"

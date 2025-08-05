@@ -143,6 +143,10 @@ class VLLMManager:
             else:
                 return "granite", None
         
+        # GPT-OSS models (OpenAI's open models with MXFP4 quantization)
+        elif 'gpt-oss' in model_lower:
+            return None, None  # Tool calling support unclear for GPT-OSS
+        
         # DeepSeek models
         elif 'deepseek' in model_lower:
             if 'deepseek-r1' in model_lower:
@@ -224,6 +228,11 @@ class VLLMManager:
         # Add tensor parallel size if > 1
         if tensor_parallel_size > 1:
             cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
+        
+        # Special handling for GPT-OSS models - disable V1 engine due to FlashInfer compatibility issues
+        if 'gpt-oss' in model_id.lower():
+            cmd.append("--disable-v1")
+            print("Note: Disabling V1 engine for GPT-OSS model (FlashInfer compatibility)")
         
         # Use environment as-is (already configured by .pirc)
         env = os.environ.copy()
