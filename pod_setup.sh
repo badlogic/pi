@@ -117,18 +117,31 @@ if [ "${VLLM_SOURCE:-0}" = "1" ]; then
     
     echo "Building and installing vLLM (this may take a while)..."
     uv pip install --no-build-isolation -e . || {
-        echo "WARNING: vLLM installation from source failed, trying pre-built version..."
-        uv pip install vllm>=0.10.0 || {
-            echo "ERROR: Failed to install vLLM"
-            exit 1
+        echo "WARNING: vLLM installation from source failed, trying GPT-OSS pre-built version..."
+        uv pip install --pre vllm==0.10.1+gptoss \
+            --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
+            --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
+            --index-strategy unsafe-best-match || {
+            echo "WARNING: Failed to install GPT-OSS vLLM, trying standard vLLM..."
+            uv pip install vllm>=0.10.0 || {
+                echo "ERROR: Failed to install vLLM"
+                exit 1
+            }
         }
     }
     cd ~
 else
-    echo "Installing vLLM (latest pre-built version)..."
-    uv pip install vllm>=0.10.0 || {
-        echo "ERROR: Failed to install vLLM"
-        exit 1
+    echo "Installing vLLM with GPT-OSS support (pre-built)..."
+    # Install vLLM with MXFP4 quantization support for GPT-OSS models
+    uv pip install --pre vllm==0.10.1+gptoss \
+        --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
+        --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
+        --index-strategy unsafe-best-match || {
+        echo "WARNING: Failed to install GPT-OSS vLLM, trying standard vLLM..."
+        uv pip install vllm>=0.10.0 || {
+            echo "ERROR: Failed to install vLLM"
+            exit 1
+        }
     }
 fi
 
