@@ -104,11 +104,11 @@ export OPENAI_API_KEY='dummy'
 The tool supports managing multiple GPU pods from a single machine. Each pod is identified by a name you choose (e.g., "prod", "dev", "h200"). While all your pods continue running independently, the tool operates on one "active" pod at a time - all model commands (start, stop, list, etc.) are directed to this active pod. You can easily switch which pod is active to manage models on different machines.
 
 ```bash
-pi setup <pod-name> "<ssh_command>" --models-path <path>  # Configure and activate a pod
-pi pods                                                   # List all pods (active pod marked)
-pi pod <pod-name>                                        # Switch active pod
-pi pod remove <pod-name>                                 # Remove pod from config
-pi shell                                                 # SSH into active pod
+pi setup <pod-name> "<ssh_command>" --models-path <path> [--mount <command>]  # Configure and activate a pod
+pi pods                                                                       # List all pods (active pod marked)
+pi pod <pod-name>                                                            # Switch active pod
+pi pod remove <pod-name>                                                     # Remove pod from config
+pi shell                                                                     # SSH into active pod
 ```
 
 #### Model Storage Paths by Provider
@@ -120,7 +120,7 @@ The `--models-path` parameter is **REQUIRED** and should point to persistent sto
 | **RunPod** | `/workspace` | Pod storage | Persists for pod lifetime |
 | **RunPod** | `/runpod-volume` | Network volume | Shared across pods (if configured) |
 | **Vast.ai** | `/workspace` | Instance storage | Check your instance details |
-| **DataCrunch** | `/data` | Persistent storage | Usually pre-mounted |
+| **DataCrunch** | `/mnt/sfs` | NFS mount | Requires manual mount (see below) |
 | **Lambda Labs** | `/persistent` | Persistent storage | Check instance config |
 | **AWS** | `/mnt/efs` | EFS mount | Configure EFS first |
 | **Custom** | `/your/path` | Your mount | Any persistent mount point |
@@ -133,9 +133,65 @@ pi setup runpod "root@123.45.67.89 -p 22" --models-path /runpod-volume
 # Vast.ai with workspace
 pi setup vast "root@vast.ai -p 22" --models-path /workspace
 
-# DataCrunch with data volume
-pi setup dc "ubuntu@dc.server.com" --models-path /data
+# DataCrunch with NFS mount (see DataCrunch section below)
+pi setup dc "ubuntu@dc.server.com" --models-path /mnt/sfs
 ```
+
+#### DataCrunch Shared Filesystem Setup
+
+DataCrunch uses NFS for shared storage. The easiest way is to use the `--mount` flag during setup:
+
+**Option 1: Automatic mount with --mount flag (Recommended)**
+
+1. **Create a Shared Filesystem (SFS) in DataCrunch dashboard**
+2. **Share it with your instance**
+3. **Copy the mount command from DataCrunch dashboard**
+4. **Run pi setup with --mount:**
+
+```bash
+# Copy the mount command from DataCrunch dashboard and use it with --mount
+pi setup dc "ubuntu@your-instance.datacrunch.io" --models-path /mnt/sfs \
+  --mount "sudo mount -t nfs -o nconnect=16 nfs.fin-01.datacrunch.io:/your-pseudo /mnt/sfs"
+```
+
+The setup will automatically:
+- Create the mount point directory
+- Execute the mount command
+- Add to /etc/fstab for persistence
+- Verify the mount succeeded
+
+**Option 2: Manual mount before setup**
+
+```bash
+# SSH into your DataCrunch instance first
+ssh ubuntu@your-instance.datacrunch.io
+
+# Create mount point
+sudo mkdir -p /mnt/sfs
+
+# Mount the filesystem (replace with your values from DataCrunch dashboard)
+# <DC> = datacenter (e.g., fin-01)
+# <PSEUDO> = pseudopath from your SFS dashboard
+sudo mount -t nfs -o nconnect=16 nfs.<DC>.datacrunch.io:<PSEUDO> /mnt/sfs
+
+# Add to fstab for persistence across reboots
+echo 'nfs.<DC>.datacrunch.io:<PSEUDO> /mnt/sfs nfs defaults,nconnect=16 0 0' | sudo tee -a /etc/fstab
+
+# Verify mount
+df -h /mnt/sfs
+
+# Exit back to your local machine
+exit
+
+# Now run pi setup with the mounted path
+pi setup dc "ubuntu@your-instance.datacrunch.io" --models-path /mnt/sfs
+```
+
+**Benefits of DataCrunch SFS:**
+- Shared across all your DataCrunch instances in the same datacenter
+- Survives instance deletion
+- Can be used to share models between multiple GPU instances
+- Pay only for storage, not compute time while models download
 
 #### Working with Multiple Pods
 

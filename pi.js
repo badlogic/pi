@@ -116,10 +116,10 @@ class PiCli {
         }
     }
 
-    async setup(podName, sshCommand, modelsPath) {
+    async setup(podName, sshCommand, modelsPath, mountCommand = null) {
         if (!podName || !sshCommand || !modelsPath) {
             console.error('\n❌ ERROR: Missing required parameters\n');
-            console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path>');
+            console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>]');
             console.error('');
             console.error('The --models-path parameter is REQUIRED to specify where models will be stored.');
             console.error('This should be a persistent volume that survives pod restarts.\n');
@@ -127,7 +127,7 @@ class PiCli {
             console.error('  • RunPod:       --models-path /workspace          (pod-specific storage)');
             console.error('  • RunPod:       --models-path /runpod-volume      (network volume)');
             console.error('  • Vast.ai:      --models-path /workspace');
-            console.error('  • DataCrunch:   --models-path /data');
+            console.error('  • DataCrunch:   --models-path /mnt/sfs            (use --mount, see below)');
             console.error('  • Lambda Labs:  --models-path /persistent');
             console.error('  • AWS:          --models-path /mnt/efs            (EFS mount)');
             console.error('  • Custom:       --models-path /your/mount/path\n');
@@ -135,6 +135,9 @@ class PiCli {
             console.error('  pi setup prod "root@135.181.71.41 -p 22" --models-path /workspace');
             console.error('  pi setup h200 "root@gpu.vast.ai -p 22" --models-path /workspace');
             console.error('  pi setup dev "ubuntu@ec2.aws.com" --models-path /mnt/efs\n');
+            console.error('DataCrunch with NFS mount (copy mount command from DataCrunch dashboard):');
+            console.error('  pi setup dc "ubuntu@server.dc.io" --models-path /mnt/sfs \\');
+            console.error('    --mount "sudo mount -t nfs -o nconnect=16 nfs.fin-01.datacrunch.io:/your-pseudo /mnt/sfs"\n');
             console.error('💡 TIP: Use network volumes when available for sharing models between pods');
             process.exit(1);
         }
@@ -161,6 +164,51 @@ class PiCli {
         } catch (e) {
             console.error('✗ SSH connection failed');
             process.exit(1);
+        }
+
+        // Execute mount command if provided
+        if (mountCommand) {
+            console.log('\nExecuting mount command...');
+            try {
+                // Create mount point directory first (extract from mount command if possible)
+                const mountPointMatch = mountCommand.match(/\s+(\/\S+)\s*$/);
+                if (mountPointMatch) {
+                    const mountPoint = mountPointMatch[1];
+                    console.log(`Creating mount point: ${mountPoint}`);
+                    this.ssh(`sudo mkdir -p ${mountPoint}`, false, true);
+                }
+                
+                // Execute the mount command
+                console.log(`Running: ${mountCommand}`);
+                const mountOutput = this.ssh(mountCommand, false, true);
+                if (mountOutput) {
+                    console.log(mountOutput);
+                }
+                
+                // Verify mount succeeded
+                console.log('Verifying mount...');
+                const dfOutput = this.ssh(`df -h ${modelsPath}`, false, true);
+                console.log(dfOutput);
+                
+                // Add to fstab if it's an NFS mount (for persistence)
+                if (mountCommand.includes('nfs')) {
+                    console.log('Adding NFS mount to /etc/fstab for persistence...');
+                    const nfsMatch = mountCommand.match(/nfs[^:]*:([^\s]+)\s+([^\s]+)/);
+                    if (nfsMatch) {
+                        const nfsPath = nfsMatch[1];
+                        const mountPoint = nfsMatch[2];
+                        const nfsServer = mountCommand.match(/(nfs[^:]*)/)[1];
+                        const fstabEntry = `${nfsServer}:${nfsPath} ${mountPoint} nfs defaults,nconnect=16 0 0`;
+                        this.ssh(`grep -qxF '${fstabEntry}' /etc/fstab || echo '${fstabEntry}' | sudo tee -a /etc/fstab`, false, true);
+                        console.log('✓ Added to /etc/fstab');
+                    }
+                }
+                
+                console.log('✓ Mount completed successfully');
+            } catch (e) {
+                console.error('⚠ Mount command failed:', e.message);
+                console.error('Continuing with setup anyway - please verify the mount manually');
+            }
         }
 
         // Copy setup files
@@ -1139,9 +1187,10 @@ class PiCli {
         console.log('\npi CLI\n');
 
         console.log('Pod Management:');
-        console.log('  pi setup <pod-name> <ssh_command> --models-path <path>');
+        console.log('  pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>]');
         console.log('                                      Configure and activate a pod');
         console.log('                                      --models-path: REQUIRED persistent storage path');
+        console.log('                                      --mount: Optional mount command (for NFS, etc)');
         console.log('  pi pods                            List all pods (active pod marked)');
         console.log('  pi pod <pod-name>                  Switch active pod');
         console.log('  pi pod remove <pod-name>           Remove pod from config\n');
@@ -1230,7 +1279,7 @@ class PiCli {
             case 'setup': {
                 if (args.length < 4) {
                     console.error('\n❌ ERROR: Missing required parameters\n');
-                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path>');
+                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>]');
                     console.error('');
                     console.error('The --models-path parameter is REQUIRED.');
                     console.error('See common paths: pi setup (without arguments)\n');
@@ -1242,24 +1291,46 @@ class PiCli {
                 const modelsPathIndex = args.indexOf('--models-path');
                 if (modelsPathIndex === -1 || !args[modelsPathIndex + 1]) {
                     console.error('\n❌ ERROR: --models-path is required\n');
-                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path>');
+                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>]');
                     console.error('');
                     console.error('Common paths by provider:');
                     console.error('  • RunPod:       --models-path /workspace');
                     console.error('  • Vast.ai:      --models-path /workspace');
-                    console.error('  • DataCrunch:   --models-path /data');
+                    console.error('  • DataCrunch:   --models-path /mnt/sfs  (use --mount with NFS command)');
                     console.error('  • Lambda Labs:  --models-path /persistent');
                     console.error('  • AWS EFS:      --models-path /mnt/efs\n');
+                    console.error('DataCrunch example with NFS mount:');
+                    console.error('  pi setup dc "ubuntu@server.dc.io" --models-path /mnt/sfs \\');
+                    console.error('    --mount "sudo mount -t nfs -o nconnect=16 nfs.fin-01.datacrunch.io:/pseudo /mnt/sfs"\n');
                     process.exit(1);
                 }
                 
                 const modelsPath = args[modelsPathIndex + 1];
+                
+                // Check for optional --mount flag
+                let mountCommand = null;
+                const mountIndex = args.indexOf('--mount');
+                if (mountIndex !== -1 && args[mountIndex + 1]) {
+                    mountCommand = args[mountIndex + 1];
+                }
+                
+                // Build SSH command (remove flags from args)
                 let sshArgs = args.slice(1);
-                // Remove --models-path and its value from the args
-                sshArgs.splice(modelsPathIndex - 1, 2);
+                
+                // Remove --models-path and its value
+                const mpIndex = sshArgs.indexOf('--models-path');
+                if (mpIndex !== -1) {
+                    sshArgs.splice(mpIndex, 2);
+                }
+                
+                // Remove --mount and its value
+                const mIndex = sshArgs.indexOf('--mount');
+                if (mIndex !== -1) {
+                    sshArgs.splice(mIndex, 2);
+                }
                 
                 const sshCmd = sshArgs.join(' ');
-                this.setup(podName, sshCmd, modelsPath);
+                this.setup(podName, sshCmd, modelsPath, mountCommand);
                 break;
             }
             case 'pods':
