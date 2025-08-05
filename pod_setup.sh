@@ -80,41 +80,49 @@ VENV="$HOME/vllm_env"
 uv venv --python 3.12 --seed "$VENV"
 source "$VENV/bin/activate"
 
-# --- Install vLLM from source with automatic PyTorch selection ---------------
+# --- Install vLLM (pre-built by default, source if VLLM_SOURCE=1) -----------
 echo "Installing PyTorch with automatic CUDA detection..."
 uv pip install torch --torch-backend=auto || {
     echo "ERROR: Failed to install PyTorch"
     exit 1
 }
 
-echo "Installing vLLM from source for GLM-4.5 support..."
-cd /tmp
-rm -rf vllm
-git clone https://github.com/vllm-project/vllm.git || {
-    echo "ERROR: Failed to clone vLLM repository"
-    exit 1
-}
-cd vllm
-python use_existing_torch.py || {
-    echo "ERROR: Failed to prepare vLLM for installation"
-    exit 1
-}
-
-echo "Installing vLLM build requirements..."
-uv pip install -r requirements/build.txt || {
-    echo "ERROR: Failed to install build requirements"
-    exit 1
-}
-
-echo "Building and installing vLLM (this may take a while)..."
-uv pip install --no-build-isolation -e . || {
-    echo "WARNING: vLLM installation from source failed, trying pre-built version..."
-    uv pip install vllm || {
+if [ "${VLLM_SOURCE:-0}" = "1" ]; then
+    echo "Building vLLM from source (this will take 10-20 minutes)..."
+    cd /tmp
+    rm -rf vllm
+    git clone https://github.com/vllm-project/vllm.git || {
+        echo "ERROR: Failed to clone vLLM repository"
+        exit 1
+    }
+    cd vllm
+    python use_existing_torch.py || {
+        echo "ERROR: Failed to prepare vLLM for installation"
+        exit 1
+    }
+    
+    echo "Installing vLLM build requirements..."
+    uv pip install -r requirements/build.txt || {
+        echo "ERROR: Failed to install build requirements"
+        exit 1
+    }
+    
+    echo "Building and installing vLLM (this may take a while)..."
+    uv pip install --no-build-isolation -e . || {
+        echo "WARNING: vLLM installation from source failed, trying pre-built version..."
+        uv pip install vllm>=0.10.0 || {
+            echo "ERROR: Failed to install vLLM"
+            exit 1
+        }
+    }
+    cd ~
+else
+    echo "Installing vLLM (latest pre-built version)..."
+    uv pip install vllm>=0.10.0 || {
         echo "ERROR: Failed to install vLLM"
         exit 1
     }
-}
-cd ~
+fi
 
 # --- Install additional packages ---------------------------------------------
 echo "Installing additional packages..."

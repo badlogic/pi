@@ -116,10 +116,10 @@ class PiCli {
         }
     }
 
-    async setup(podName, sshCommand, modelsPath, mountCommand = null) {
+    async setup(podName, sshCommand, modelsPath, mountCommand = null, vllmSource = false) {
         if (!podName || !sshCommand || !modelsPath) {
             console.error('\n❌ ERROR: Missing required parameters\n');
-            console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>]');
+            console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>] [--vllm-source]');
             console.error('');
             console.error('The --models-path parameter is REQUIRED to specify where models will be stored.');
             console.error('This should be a persistent volume that survives pod restarts.\n');
@@ -138,6 +138,8 @@ class PiCli {
             console.error('DataCrunch with NFS mount (copy mount command from DataCrunch dashboard):');
             console.error('  pi setup dc "ubuntu@server.dc.io" --models-path /mnt/sfs \\');
             console.error('    --mount "sudo mount -t nfs -o nconnect=16 nfs.fin-01.datacrunch.io:/your-pseudo /mnt/sfs"\n');
+            console.error('Optional flags:');
+            console.error('  --vllm-source    Build vLLM from source (slower but latest features)\n');
             console.error('💡 TIP: Use network volumes when available for sharing models between pods');
             process.exit(1);
         }
@@ -225,8 +227,11 @@ class PiCli {
             process.exit(1);
         }
         
-        // Pass models path as environment variable
+        // Pass models path and vllm source flag as environment variables
         const envVars = [`HF_TOKEN="${hfToken}"`, `MODELS_PATH="${modelsPath}"`];
+        if (vllmSource) {
+            envVars.push('VLLM_SOURCE=1');
+        }
         
         try {
             await this.ssh(`export ${envVars.join(' ')} && bash pod_setup.sh`, true, true);
@@ -1214,10 +1219,11 @@ class PiCli {
         console.log('\npi CLI\n');
 
         console.log('Pod Management:');
-        console.log('  pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>]');
+        console.log('  pi setup <pod-name> <ssh_command> --models-path <path> [options]');
         console.log('                                      Configure and activate a pod');
         console.log('                                      --models-path: REQUIRED persistent storage path');
         console.log('                                      --mount: Optional mount command (for NFS, etc)');
+        console.log('                                      --vllm-source: Build vLLM from source (default: pre-built)');
         console.log('  pi pods                            List all pods (active pod marked)');
         console.log('  pi pod <pod-name>                  Switch active pod');
         console.log('  pi pod remove <pod-name>           Remove pod from config\n');
@@ -1306,7 +1312,7 @@ class PiCli {
             case 'setup': {
                 if (args.length < 4) {
                     console.error('\n❌ ERROR: Missing required parameters\n');
-                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>]');
+                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>] [--vllm-source]');
                     console.error('');
                     console.error('The --models-path parameter is REQUIRED.');
                     console.error('See common paths: pi setup (without arguments)\n');
@@ -1328,7 +1334,7 @@ class PiCli {
                 
                 if (modelsPathIndex === -1 || !args[modelsPathIndex + 1]) {
                     console.error('\n❌ ERROR: --models-path is required\n');
-                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>]');
+                    console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>] [--vllm-source]');
                     console.error('');
                     console.error('Common paths by provider:');
                     console.error('  • RunPod:       --models-path /workspace');
@@ -1351,6 +1357,9 @@ class PiCli {
                     mountCommand = args[mountIndex + 1];
                 }
                 
+                // Check for optional --vllm-source flag
+                const vllmSource = args.includes('--vllm-source');
+                
                 // Build SSH command (remove flags from args)
                 let sshArgs = args.slice(1);
                 
@@ -1366,8 +1375,14 @@ class PiCli {
                     sshArgs.splice(mIndex, 2);
                 }
                 
+                // Remove --vllm-source flag
+                const vsIndex = sshArgs.indexOf('--vllm-source');
+                if (vsIndex !== -1) {
+                    sshArgs.splice(vsIndex, 1);
+                }
+                
                 const sshCmd = sshArgs.join(' ');
-                this.setup(podName, sshCmd, modelsPath, mountCommand);
+                this.setup(podName, sshCmd, modelsPath, mountCommand, vllmSource);
                 break;
             }
             case 'pods':
