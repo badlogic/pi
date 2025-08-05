@@ -1288,7 +1288,17 @@ class PiCli {
                 const podName = args[0];
                 
                 // Check for --models-path flag (now required)
-                const modelsPathIndex = args.indexOf('--models-path');
+                // Also check for common typo --model-path (without 's')
+                let modelsPathIndex = args.indexOf('--models-path');
+                if (modelsPathIndex === -1) {
+                    // Check for common typo
+                    const typoIndex = args.indexOf('--model-path');
+                    if (typoIndex !== -1) {
+                        console.error('\n❌ ERROR: You typed "--model-path" but the correct parameter is "--models-path" (with an "s")\n');
+                        process.exit(1);
+                    }
+                }
+                
                 if (modelsPathIndex === -1 || !args[modelsPathIndex + 1]) {
                     console.error('\n❌ ERROR: --models-path is required\n');
                     console.error('Usage: pi setup <pod-name> <ssh_command> --models-path <path> [--mount <command>]');

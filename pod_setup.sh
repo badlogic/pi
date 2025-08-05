@@ -56,7 +56,7 @@ if [[ "$NVCC_VERSION" != "$DRIVER_CUDA_VERSION" ]]; then
     
     # Add CUDA to PATH
     export PATH=/usr/local/cuda-${DRIVER_CUDA_VERSION}/bin:$PATH
-    export LD_LIBRARY_PATH=/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:${LD_LIBRARY_PATH:-}
     
     # Verify installation
     nvcc --version
@@ -119,8 +119,8 @@ touch ~/.config/vllm/do_not_track
 
 cat > ~/.pirc <<EOF
 # auto-sourced env
-[ -d "$HOME/vllm_env" ] && source "$HOME/vllm_env/bin/activate"
-export PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/bin:$HOME/.local/bin:$PATH"
+[ -d "\$HOME/vllm_env" ] && source "\$HOME/vllm_env/bin/activate"
+export PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/bin:\$HOME/.local/bin:\$PATH"
 export LD_LIBRARY_PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:\${LD_LIBRARY_PATH:-}"
 export VLLM_ATTENTION_BACKEND=${ATTENTION_BACKEND}
 export VLLM_USE_FLASHINFER_SAMPLER=1
