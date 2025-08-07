@@ -28,8 +28,8 @@ interface ToolCall {
 
 const display = {
 	thinking: (text: string) => {
-		console.log(chalk.cyan("[thinking]"));
-		console.log(text);
+		console.log(chalk.dim("[thinking]"));
+		console.log(chalk.dim(text));
 		console.log();
 	},
 
@@ -52,8 +52,11 @@ const display = {
 		console.log();
 	},
 
-	assistant: (text: string) => {
+	assistantLabel: () => {
 		console.log(chalk.bgHex("#FFA500").white("[assistant]"));
+	},
+
+	assistantMessage: (text: string) => {
 		console.log(text);
 		console.log();
 	},
@@ -62,7 +65,7 @@ const display = {
 		if (text) {
 			console.log(chalk.bgGreen.white("[user]"));
 			console.log(text);
-			console.log();
+			console.log(); // Extra newline after user message
 		} else {
 			// For interactive mode - just the label since text is already shown
 			console.log(chalk.bgGreen.white("[user]"));
@@ -183,6 +186,9 @@ async function callGptOssModel(client: OpenAI, model: string, messages: any[]): 
 		content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
 	}));
 
+	// Show assistant label at the start
+	display.assistantLabel();
+
 	let conversationDone = false;
 	const maxRounds = 10;
 
@@ -211,7 +217,7 @@ async function callGptOssModel(client: OpenAI, model: string, messages: any[]): 
 				case "message": {
 					const text = item.content?.find((c: any) => c.type === "output_text")?.text;
 					if (text) {
-						display.assistant(text);
+						display.assistantMessage(text);
 						conversationDone = true;
 						return text;
 					}
@@ -263,6 +269,9 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 		content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
 	}));
 
+	// Show assistant label at the start
+	display.assistantLabel();
+
 	const maxRounds = 5;
 	let assistantResponded = false;
 
@@ -309,7 +318,7 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 				tool_calls: message.tool_calls,
 			} as any);
 		} else if (message.content) {
-			display.assistant(message.content);
+			display.assistantMessage(message.content);
 			assistantResponded = true;
 			return message.content;
 		}
@@ -371,7 +380,8 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 		const messages: any[] = [{ role: "system", content: systemPrompt }];
 
 		while (true) {
-			const input = await rl.question(chalk.bgGreen.white("[user] "));
+			console.log(chalk.bgGreen.white("[user]"));
+			const input = await rl.question(``);
 
 			if (input.toLowerCase() === "exit") {
 				rl.close();
@@ -390,8 +400,6 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 			} catch (e: any) {
 				display.error(e.message);
 			}
-
-			console.log(chalk.gray("─".repeat(50)));
 		}
 	} else {
 		// Single-shot mode with queued prompts
