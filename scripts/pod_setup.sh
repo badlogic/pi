@@ -144,23 +144,29 @@ uv venv --python 3.12 --seed "$VENV"
 source "$VENV/bin/activate"
 
 # --- Install PyTorch and vLLM ------------------------------------------------
-echo "Installing PyTorch with automatic CUDA detection..."
-uv pip install torch --torch-backend=auto || {
-    echo "ERROR: Failed to install PyTorch"
-    exit 1
-}
-
-echo "Installing vLLM (version: $VLLM_VERSION)..."
+echo "Installing vLLM and dependencies (version: $VLLM_VERSION)..."
 case "$VLLM_VERSION" in
     release)
-        echo "Installing latest vLLM release (>=0.10.0)..."
+        echo "Installing PyTorch (stable) and vLLM release..."
+        # Install stable PyTorch with automatic CUDA detection
+        uv pip install torch --torch-backend=auto || {
+            echo "ERROR: Failed to install PyTorch"
+            exit 1
+        }
+        # Install latest vLLM release
         uv pip install vllm>=0.10.0 || {
             echo "ERROR: Failed to install vLLM"
             exit 1
         }
         ;;
     source)
-        echo "Installing vLLM from source (latest main branch)..."
+        echo "Installing PyTorch (stable) and building vLLM from source..."
+        # Install stable PyTorch
+        uv pip install torch --torch-backend=auto || {
+            echo "ERROR: Failed to install PyTorch"
+            exit 1
+        }
+        echo "Building vLLM from source (latest main branch)..."
         echo "This will take 10-15 minutes..."
         # Install build dependencies
         uv pip install ninja packaging setuptools || {
@@ -182,17 +188,22 @@ case "$VLLM_VERSION" in
         cd /
         ;;
     gpt-oss)
-        echo "Installing GPT-OSS special vLLM build..."
+        echo "Installing GPT-OSS special build with PyTorch nightly..."
         echo "WARNING: This build is ONLY for GPT-OSS models!"
-        echo "Installing cutting-edge dependencies for GPT-OSS support..."
+        echo "Installing PyTorch nightly and cutting-edge dependencies..."
         
-        # Install the GPT-OSS prerelease version with special dependencies
+        # Convert CUDA version format for PyTorch (12.4 -> cu124)
+        PYTORCH_CUDA="cu$(echo $DRIVER_CUDA_VERSION | sed 's/\.//')"
+        echo "Using PyTorch nightly with ${PYTORCH_CUDA} (driver supports ${DRIVER_CUDA_VERSION})"
+        
+        # The GPT-OSS build will pull PyTorch nightly and other dependencies
+        # via the extra index URLs. We don't pre-install torch here to avoid conflicts.
         uv pip install --pre vllm==0.10.1+gptoss \
             --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
-            --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
+            --extra-index-url https://download.pytorch.org/whl/nightly/${PYTORCH_CUDA} \
             --index-strategy unsafe-best-match || {
             echo "ERROR: Failed to install GPT-OSS vLLM build"
-            echo "This requires PyTorch nightly, Triton nightly, and other cutting-edge dependencies"
+            echo "This automatically installs PyTorch nightly with ${PYTORCH_CUDA}, Triton nightly, and other dependencies"
             exit 1
         }
         

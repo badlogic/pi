@@ -4,8 +4,9 @@ import { spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { listModels, promptModel, startModel, stopModel, viewLogs } from "./commands/models.js";
+import { listModels, startModel, stopModel, viewLogs } from "./commands/models.js";
 import { listPods, removePodCommand, setupPod, switchActivePod } from "./commands/pods.js";
+import { promptModel } from "./commands/prompt.js";
 import { getActivePod, loadConfig } from "./config.js";
 import { sshExecStream } from "./ssh.js";
 
@@ -26,15 +27,15 @@ Pod Management:
   pi pods                                           List all pods (* = active)
   pi pods active <name>                             Switch active pod
   pi pods remove <name>                             Remove pod from local config
-  pi ssh [<name>]                                   SSH into pod (active or specified)
-  pi shell [<name>] "<command>"                     Run command on pod
+  pi shell [<name>]                                 Open shell on pod (active or specified)
+  pi ssh [<name>] "<command>"                       Run SSH command on pod
 
 Model Management:
   pi start <model> --name <name> [--vllm ...]       Start a model
   pi stop [<name>]                                  Stop model (or all if no name)
   pi list                                           List running models
   pi logs <name>                                    Stream model logs
-  pi prompt <name> "<message>"                      Test model with prompt
+  pi prompt <name> "<message>" [--thinking]         Test model with prompt & tools
 
   All model commands support --pod <name> to override the active pod.
   For start: use --vllm to pass remaining args directly to vLLM.
@@ -145,8 +146,8 @@ try {
 
 		// Handle SSH/shell commands and model commands
 		switch (command) {
-			case "ssh": {
-				// pi ssh [<name>]
+			case "shell": {
+				// pi shell [<name>] - open interactive shell
 				const podName = args[1];
 				let podInfo: { name: string; pod: import("./types.js").Pod } | null = null;
 
@@ -183,20 +184,20 @@ try {
 				});
 				break;
 			}
-			case "shell": {
-				// pi shell [<name>] "<command>"
+			case "ssh": {
+				// pi ssh [<name>] "<command>" - run command via SSH
 				let podName: string | undefined;
-				let shellCommand: string;
+				let sshCommand: string;
 
 				if (args.length === 2) {
-					// pi shell "<command>" - use active pod
-					shellCommand = args[1];
+					// pi ssh "<command>" - use active pod
+					sshCommand = args[1];
 				} else if (args.length === 3) {
-					// pi shell <name> "<command>"
+					// pi ssh <name> "<command>"
 					podName = args[1];
-					shellCommand = args[2];
+					sshCommand = args[2];
 				} else {
-					console.error('Usage: pi shell [<name>] "<command>"');
+					console.error('Usage: pi ssh [<name>] "<command>"');
 					process.exit(1);
 				}
 
@@ -221,10 +222,10 @@ try {
 					process.exit(1);
 				}
 
-				console.log(chalk.gray(`Running on pod '${podInfo.name}': ${shellCommand}`));
+				console.log(chalk.gray(`Running on pod '${podInfo.name}': ${sshCommand}`));
 
 				// Execute command and stream output
-				const exitCode = await sshExecStream(podInfo.pod.ssh, shellCommand);
+				const exitCode = await sshExecStream(podInfo.pod.ssh, sshCommand);
 				process.exit(exitCode);
 				break;
 			}
@@ -302,14 +303,34 @@ try {
 				break;
 			}
 			case "prompt": {
-				// pi prompt <name> "<message>"
+				// pi prompt <name> ["<message>"] [-i|--interactive]
 				const name = args[1];
-				const message = args[2];
-				if (!name || !message) {
-					console.error('Usage: pi prompt <name> "<message>"');
+				if (!name) {
+					console.error('Usage: pi prompt <name> ["<message>"] [-i|--interactive]');
 					process.exit(1);
 				}
-				await promptModel(name, message, { pod: podOverride });
+
+				const interactive = args.includes("-i") || args.includes("--interactive");
+				const apiKey = process.env.VLLM_API_KEY;
+
+				// Collect all messages (skip model name and flags)
+				const messages: string[] = [];
+				for (let i = 2; i < args.length; i++) {
+					if (!args[i].startsWith("-")) {
+						messages.push(args[i]);
+					}
+				}
+
+				if (!interactive && messages.length === 0) {
+					console.error('Usage: pi prompt <name> "<message>"... or pi prompt <name> -i');
+					process.exit(1);
+				}
+
+				await promptModel(name, messages.length > 0 ? messages : undefined, {
+					pod: podOverride,
+					interactive,
+					apiKey,
+				});
 				break;
 			}
 			default:

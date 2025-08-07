@@ -42,15 +42,18 @@
 	},
 	"preferGlobal": true,
 	"dependencies": {
+		"@ai-sdk/openai": "^2.0.5",
+		"ai": "^5.0.8",
 		"chalk": "^5.5.0",
-		"openai": "^5.12.0"
+		"openai": "^5.12.1",
+		"zod": "^3.25.76"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.1.3",
 		"@types/node": "^20.19.9",
 		"husky": "^9.1.7",
-		"typescript": "^5.9.2",
-    "tsx": "^4.20.3"
+		"tsx": "^4.20.3",
+		"typescript": "^5.9.2"
 	},
 	"types": "./dist/index.d.ts"
 }

@@ -1,9 +1,12 @@
 import chalk from "chalk";
 import { spawn } from "child_process";
+import { readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { getActivePod, loadConfig, saveConfig } from "../config.js";
 import { getModelConfig, getModelName, isKnownModel } from "../model-configs.js";
-import { sshExec, sshExecStream } from "../ssh.js";
-import type { Model, Pod } from "../types.js";
+import { sshExec } from "../ssh.js";
+import type { Pod } from "../types.js";
 
 /**
  * Get the pod to use (active or override)
@@ -84,12 +87,11 @@ export const startModel = async (
 ) => {
 	const { name: podName, pod } = getPod(options.pod);
 
+	// Validation
 	if (!pod.modelsPath) {
 		console.error(chalk.red("Pod does not have a models path configured"));
 		process.exit(1);
 	}
-
-	// Check if name already exists
 	if (pod.models[name]) {
 		console.error(chalk.red(`Model '${name}' already exists on pod '${podName}'`));
 		process.exit(1);
@@ -97,351 +99,218 @@ export const startModel = async (
 
 	const port = getNextPort(pod);
 
-	// Get default configuration for known models
-	const isKnown = isKnownModel(modelId);
-	let modelConfig = null;
+	// Determine GPU allocation and vLLM args
 	let gpus: number[] = [];
+	let vllmArgs: string[] = [];
+	let modelConfig = null;
 
-	// User provided custom --vllm args, takes precedence
-	if (options.vllmArgs && options.vllmArgs.length > 0) {
-		if (isKnown) {
-			console.log(chalk.yellow("Warning: Using custom --vllm args, ignoring known model configuration"));
-		}
-
-		// We don't know which GPUs will be used, mark as unknown
-		gpus = [];
+	if (options.vllmArgs?.length) {
+		// Custom args override everything
+		vllmArgs = options.vllmArgs;
 		console.log(chalk.gray("Using custom vLLM args, GPU allocation managed by vLLM"));
-	} else if (isKnown) {
-		// Known model, use our configuration
-		// Try to find a config that matches our hardware
-		// Start with all GPUs, then try fewer
+	} else if (isKnownModel(modelId)) {
+		// Find best config for this hardware
 		for (let gpuCount = pod.gpus.length; gpuCount >= 1; gpuCount--) {
 			modelConfig = getModelConfig(modelId, pod.gpus, gpuCount);
 			if (modelConfig) {
 				gpus = selectGPUs(pod, gpuCount);
+				vllmArgs = [...(modelConfig.args || [])];
 				break;
 			}
 		}
-
 		if (!modelConfig) {
-			console.error(
-				chalk.red(`Model '${getModelName(modelId)}' requires specific GPU configuration not available on this pod`),
-			);
-			console.error(`Available: ${pod.gpus.length}x ${pod.gpus[0]?.name || "Unknown GPU"}`);
-			console.error(`Check docs/models.md for hardware requirements`);
+			console.error(chalk.red(`Model '${getModelName(modelId)}' not compatible with this pod's GPUs`));
 			process.exit(1);
 		}
 	} else {
-		// Unknown model, default to single GPU
+		// Unknown model - single GPU default
 		gpus = selectGPUs(pod, 1);
 		console.log(chalk.gray("Unknown model, defaulting to single GPU"));
 	}
 
-	// Warn about vLLM version compatibility
-	if (pod.vllmVersion === "gpt-oss" && !modelId.toLowerCase().includes("gpt-oss")) {
-		console.log(chalk.yellow("⚠️  WARNING: This pod has the GPT-OSS special vLLM build installed."));
-		console.log(chalk.yellow("   Non-GPT-OSS models may not work correctly."));
-		console.log(chalk.yellow("   This build includes PyTorch nightly and other cutting-edge dependencies."));
-		console.log("");
-	} else if (modelId.toLowerCase().includes("gpt-oss") && pod.vllmVersion !== "gpt-oss") {
-		console.log(chalk.yellow("⚠️  WARNING: GPT-OSS models require the special GPT-OSS vLLM build."));
-		console.log(chalk.yellow("   Set up a pod with: pi pods setup <name> <ssh> --vllm gpt-oss"));
-		console.log("");
-	} else if (pod.vllmVersion === "source" && modelId.toLowerCase().includes("glm-4.5")) {
-		console.log(chalk.green("✓ This pod has vLLM built from source, which should support GLM-4.5 models."));
-		console.log("");
-	} else if (pod.vllmVersion === "release" && modelId.toLowerCase().includes("glm-4.5") && modelId.includes("FP8")) {
-		console.log(chalk.yellow("⚠️  WARNING: GLM-4.5 FP8 models may require vLLM built from source."));
-		console.log(chalk.yellow("   Consider setting up the pod with --vllm source"));
-		console.log("");
+	// Apply memory/context overrides
+	if (!options.vllmArgs?.length) {
+		if (options.memory) {
+			const fraction = parseFloat(options.memory.replace("%", "")) / 100;
+			vllmArgs = vllmArgs.filter((arg) => !arg.includes("gpu-memory-utilization"));
+			vllmArgs.push("--gpu-memory-utilization", String(fraction));
+		}
+		if (options.context) {
+			const contextSizes: Record<string, number> = {
+				"4k": 4096,
+				"8k": 8192,
+				"16k": 16384,
+				"32k": 32768,
+				"64k": 65536,
+				"128k": 131072,
+			};
+			const maxTokens = contextSizes[options.context.toLowerCase()] || parseInt(options.context);
+			vllmArgs = vllmArgs.filter((arg) => !arg.includes("max-model-len"));
+			vllmArgs.push("--max-model-len", String(maxTokens));
+		}
 	}
 
+	// Show what we're doing
 	console.log(chalk.green(`Starting model '${name}' on pod '${podName}'...`));
 	console.log(`Model: ${modelId}`);
-	if (isKnown && !options.vllmArgs) {
-		console.log(chalk.gray(`(Known model: ${getModelName(modelId)})`));
-	}
 	console.log(`Port: ${port}`);
-
-	// Show GPU allocation info
-	if (gpus.length === 0) {
-		console.log(`GPU(s): Managed by vLLM (custom args)`);
-	} else if (gpus.length === 1) {
-		console.log(`GPU: ${gpus[0]}`);
-	} else {
-		console.log(`GPUs: ${gpus.join(", ")}`);
-	}
-
-	if (modelConfig?.notes) {
-		console.log(chalk.yellow(`Note: ${modelConfig.notes}`));
-	}
+	console.log(`GPU(s): ${gpus.length ? gpus.join(", ") : "Managed by vLLM"}`);
+	if (modelConfig?.notes) console.log(chalk.yellow(`Note: ${modelConfig.notes}`));
 	console.log("");
 
-	// Download model (HF will skip if already cached)
-	console.log("Downloading model (will skip if cached)...");
-	const downloadCmd = `source /root/venv/bin/activate && HF_TOKEN='${process.env.HF_TOKEN}' HF_HUB_ENABLE_HF_TRANSFER=1 hf download '${modelId}'`;
+	// Read and customize model_run.sh script with our values
+	const scriptPath = join(dirname(fileURLToPath(import.meta.url)), "../../scripts/model_run.sh");
+	let scriptContent = readFileSync(scriptPath, "utf-8");
 
-	// Handle Ctrl+C during download - just exit cleanly
-	const downloadCleanup = () => {
-		console.log(chalk.yellow("\n\nDownload interrupted"));
-		process.exit(0);
-	};
+	// Replace placeholders - no escaping needed, heredoc with 'EOF' is literal
+	scriptContent = scriptContent
+		.replace("{{MODEL_ID}}", modelId)
+		.replace("{{NAME}}", name)
+		.replace("{{PORT}}", String(port))
+		.replace("{{VLLM_ARGS}}", vllmArgs.join(" "));
 
-	process.on("SIGINT", downloadCleanup);
+	// Upload customized script
+	const result = await sshExec(
+		pod.ssh,
+		`cat > /tmp/model_run_${name}.sh << 'EOF'
+${scriptContent}
+EOF
+chmod +x /tmp/model_run_${name}.sh`,
+	);
 
-	// Use forceTTY for colored progress bars and keepAlive for long downloads
-	const downloadExit = await sshExecStream(pod.ssh, downloadCmd, {
-		forceTTY: true,
-		keepAlive: true,
-	});
-
-	// Remove the signal handler after download completes
-	process.removeListener("SIGINT", downloadCleanup);
-
-	if (downloadExit !== 0) {
-		console.error(chalk.red("Failed to download model"));
-		process.exit(1);
-	}
-
-	// Build vLLM command
-	let vllmCmd = `vllm serve '${modelId}' --port ${port} --api-key '${process.env.VLLM_API_KEY}'`;
-
-	if (options.vllmArgs && options.vllmArgs.length > 0) {
-		// User provided custom args, use only those
-		vllmCmd += " " + options.vllmArgs.join(" ");
-		if (options.memory || options.context) {
-			console.log(chalk.yellow("Warning: --memory and --context are ignored when using --vllm args"));
-		}
-	} else if (modelConfig?.args) {
-		// Use known model configuration
-		vllmCmd += " " + modelConfig.args.join(" ");
-
-		// Allow memory override for known models
-		if (options.memory) {
-			const memoryFraction = parseFloat(options.memory.replace("%", "")) / 100;
-			// Remove any existing --gpu-memory-utilization from defaults
-			vllmCmd = vllmCmd.replace(/--gpu-memory-utilization\s+[\d.]+/g, "");
-			vllmCmd += ` --gpu-memory-utilization ${memoryFraction}`;
-		}
-
-		// Allow context override for known models
-		if (options.context) {
-			const contextMap: Record<string, number> = {
-				"4k": 4096,
-				"8k": 8192,
-				"16k": 16384,
-				"32k": 32768,
-				"64k": 65536,
-				"128k": 131072,
-			};
-			const maxTokens = contextMap[options.context.toLowerCase()] || parseInt(options.context);
-			// Remove any existing --max-model-len from defaults
-			vllmCmd = vllmCmd.replace(/--max-model-len\s+\d+/g, "");
-			vllmCmd += ` --max-model-len ${maxTokens}`;
-		}
-	} else {
-		// Unknown model with no custom args, defaults will be used
-		// Only add memory and context if specified
-		if (options.memory) {
-			const memoryFraction = parseFloat(options.memory.replace("%", "")) / 100;
-			vllmCmd += ` --gpu-memory-utilization ${memoryFraction}`;
-		}
-
-		if (options.context) {
-			const contextMap: Record<string, number> = {
-				"4k": 4096,
-				"8k": 8192,
-				"16k": 16384,
-				"32k": 32768,
-				"64k": 65536,
-				"128k": 131072,
-			};
-			const maxTokens = contextMap[options.context.toLowerCase()] || parseInt(options.context);
-			vllmCmd += ` --max-model-len ${maxTokens}`;
-		}
-	}
-
-	// Build environment variables
-	const envVars = [
+	// Prepare environment
+	const env = [
 		`HF_TOKEN='${process.env.HF_TOKEN}'`,
 		`VLLM_API_KEY='${process.env.VLLM_API_KEY}'`,
 		`HF_HUB_ENABLE_HF_TRANSFER=1`,
 		`VLLM_NO_USAGE_STATS=1`,
-		`VLLM_DO_NOT_TRACK=1`,
 		`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`,
-		`PYTHONUNBUFFERED=1`, // Ensure output isn't buffered
-	];
+		`FORCE_COLOR=1`,
+		`TERM=xterm-256color`,
+		...(gpus.length === 1 ? [`CUDA_VISIBLE_DEVICES=${gpus[0]}`] : []),
+		...Object.entries(modelConfig?.env || {}).map(([k, v]) => `${k}='${v}'`),
+	]
+		.map((e) => `export ${e}`)
+		.join("\n");
 
-	// Set CUDA_VISIBLE_DEVICES for GPU selection when we're tracking specific GPUs
-	// For single GPU deployments on multi-GPU systems
-	if (gpus.length === 1) {
-		envVars.push(`CUDA_VISIBLE_DEVICES=${gpus[0]}`);
-	} else if (gpus.length > 1 && !options.vllmArgs) {
-		// For multi-GPU deployments from our config (not custom args)
-		// Let vLLM use the GPUs specified by tensor-parallel-size
-		// We could set CUDA_VISIBLE_DEVICES to limit which GPUs, but for now
-		// we assume the pod is dedicated to this model
-	}
-	// For custom vllm args (gpus.length === 0), don't set CUDA_VISIBLE_DEVICES
-	// User has full control
-
-	// Add model-specific environment variables
-	if (modelConfig?.env) {
-		for (const [key, value] of Object.entries(modelConfig.env)) {
-			envVars.push(`${key}='${value}'`);
-		}
-	}
-
-	// Start vLLM server
-	console.log("");
-	console.log("Starting vLLM server...");
-	console.log(chalk.gray(`Command: ${vllmCmd}`));
-	console.log("");
-
-	// Start vLLM in background
+	// Start the model runner with script command for pseudo-TTY (preserves colors)
 	const startCmd = `
-		source /root/venv/bin/activate
-		${envVars.map((v) => `export ${v}`).join("\n\t\t")}
-
-		# Ensure log directory exists
+		${env}
 		mkdir -p ~/.vllm_logs
-
-		# Just use nohup without colors for now - simpler and more reliable
-		nohup ${vllmCmd} > ~/.vllm_logs/${name}.log 2>&1 &
+		setsid script -q -f -c "/tmp/model_run_${name}.sh" ~/.vllm_logs/${name}.log </dev/null >/dev/null 2>&1 &
 		echo $!
+		exit 0
 	`;
 
-	// Get the PID first
 	const pidResult = await sshExec(pod.ssh, startCmd);
-	const pid = parseInt(pidResult.stdout.trim()) || 0;
-
+	const pid = parseInt(pidResult.stdout.trim());
 	if (!pid) {
-		console.error(chalk.red("Failed to start vLLM process"));
+		console.error(chalk.red("Failed to start model runner"));
 		process.exit(1);
 	}
 
-	// Save to config immediately so we can stop it if needed
+	// Save to config
 	const config = loadConfig();
-	const model: Model = {
-		model: modelId,
-		port,
-		gpu: gpus,
-		pid,
-	};
-	config.pods[podName].models[name] = model;
+	config.pods[podName].models[name] = { model: modelId, port, gpu: gpus, pid };
 	saveConfig(config);
 
-	console.log(`Process started with PID: ${pid}`);
-	console.log("Streaming logs... (Press Ctrl+C to stop monitoring)\n");
+	console.log(`Model runner started with PID: ${pid}`);
+	console.log("Streaming logs... (waiting for startup)\n");
 
-	// Stream logs and watch for success/failure
+	// Small delay to ensure log file is created
+	await new Promise((resolve) => setTimeout(resolve, 500));
+
+	// Stream logs with color support, watching for startup complete
+	const sshParts = pod.ssh.split(" ");
+	const sshCommand = sshParts[0]; // "ssh"
+	const sshArgs = sshParts.slice(1); // ["root@86.38.238.55"]
+	const host = sshArgs[0].split("@")[1] || "localhost";
 	const tailCmd = `tail -f ~/.vllm_logs/${name}.log`;
-	const sshArgs = pod.ssh.split(" ").slice(1);
-	sshArgs.push(tailCmd);
 
-	const logProcess = spawn("ssh", sshArgs);
+	// Build the full args array for spawn
+	const fullArgs = [...sshArgs, tailCmd];
 
-	let serverReady = false;
-	let serverFailed = false;
+	const logProcess = spawn(sshCommand, fullArgs, {
+		stdio: ["inherit", "pipe", "pipe"], // capture stdout and stderr
+		env: { ...process.env, FORCE_COLOR: "1" },
+	});
 
-	// Handle Ctrl+C gracefully
 	let interrupted = false;
-	const cleanup = () => {
-		if (!interrupted) {
-			interrupted = true;
-			logProcess.kill();
-			if (!serverReady) {
-				console.log(chalk.yellow("\n\nStopped monitoring. Server is still starting in background."));
-				console.log(chalk.cyan(`Check status with: pi logs ${name}`));
-				console.log(chalk.cyan(`Stop server with: pi stop ${name}`));
+	let startupComplete = false;
+
+	// Handle Ctrl+C
+	const sigintHandler = () => {
+		interrupted = true;
+		logProcess.kill();
+	};
+	process.on("SIGINT", sigintHandler);
+
+	// Process log output line by line
+	const processOutput = (data: Buffer) => {
+		const lines = data.toString().split("\n");
+		for (const line of lines) {
+			if (line) {
+				console.log(line); // Echo the line to console
+
+				// Check for startup complete message
+				if (line.includes("Application startup complete")) {
+					startupComplete = true;
+					logProcess.kill(); // Stop tailing logs
+				}
 			}
 		}
 	};
 
-	process.on("SIGINT", cleanup);
+	logProcess.stdout?.on("data", processOutput);
+	logProcess.stderr?.on("data", processOutput);
 
-	// Set up log monitoring
-	logProcess.stdout.on("data", (data) => {
-		const text = data.toString();
-		process.stdout.write(text);
+	await new Promise<void>((resolve) => logProcess.on("exit", resolve));
+	process.removeListener("SIGINT", sigintHandler);
 
-		// Check for success
-		if (
-			text.includes("Uvicorn running on") ||
-			text.includes("Application startup complete") ||
-			text.includes(`http://0.0.0.0:${port}`)
-		) {
-			serverReady = true;
-			logProcess.kill();
-		}
+	if (startupComplete) {
+		// Model started successfully - output connection details
+		console.log("\n" + chalk.green("✓ Model started successfully!"));
+		console.log("\n" + chalk.bold("Connection Details:"));
+		console.log(chalk.cyan("─".repeat(50)));
+		console.log(chalk.white("Base URL:    ") + chalk.yellow(`http://${host}:${port}/v1`));
+		console.log(chalk.white("Model:       ") + chalk.yellow(modelId));
+		console.log(chalk.white("API Key:     ") + chalk.yellow(process.env.VLLM_API_KEY || "(not set)"));
+		console.log(chalk.cyan("─".repeat(50)));
 
-		// Check for failure
-		if (
-			text.includes("CUDA out of memory") ||
-			text.includes("torch.cuda.OutOfMemoryError") ||
-			text.includes("Address already in use") ||
-			(text.includes("RuntimeError") && !text.includes("Initializing")) ||
-			text.includes("AssertionError") ||
-			text.includes("NotImplementedError") ||
-			text.includes("Engine core initialization failed")
-		) {
-			serverFailed = true;
-			logProcess.kill();
-		}
-	});
+		console.log("\n" + chalk.bold("Export for shell:"));
+		console.log(chalk.gray(`export OPENAI_BASE_URL="http://${host}:${port}/v1"`));
+		console.log(chalk.gray(`export OPENAI_API_KEY="${process.env.VLLM_API_KEY || "your-api-key"}"`));
+		console.log(chalk.gray(`export OPENAI_MODEL="${modelId}"`));
 
-	logProcess.stderr.on("data", (data) => {
-		process.stderr.write(data);
-	});
-
-	// Wait for process to exit (either from success/failure detection or user interrupt)
-	await new Promise<void>((resolve) => {
-		logProcess.on("exit", () => resolve());
-	});
-
-	// Clean up signal handler
-	process.removeListener("SIGINT", cleanup);
-
-	// Check what happened
-	if (serverFailed) {
-		console.error(chalk.red("\n✗ Server failed to start"));
-		// Remove from config since it failed
-		const config = loadConfig();
-		delete config.pods[podName].models[name];
-		saveConfig(config);
-		await sshExec(pod.ssh, `kill ${pid} 2>/dev/null || true`);
-		process.exit(1);
+		console.log("\n" + chalk.bold("Example usage:"));
+		console.log(
+			chalk.gray(`
+  # Python
+  from openai import OpenAI
+  client = OpenAI()  # Uses env vars
+  response = client.chat.completions.create(
+      model="${modelId}",
+      messages=[{"role": "user", "content": "Hello!"}]
+  )
+  
+  # CLI
+  curl $OPENAI_BASE_URL/chat/completions \\
+    -H "Authorization: Bearer $OPENAI_API_KEY" \\
+    -H "Content-Type: application/json" \\
+    -d '{"model":"${modelId}","messages":[{"role":"user","content":"Hi"}]}'`),
+		);
+		console.log("");
+		console.log(chalk.cyan(`Monitor logs:  pi logs ${name}`));
+		console.log(chalk.cyan(`Stop model:    pi stop ${name}`));
+	} else if (interrupted) {
+		console.log(chalk.yellow("\n\nStopped monitoring. Model deployment continues in background."));
+		console.log(chalk.cyan(`Check status with: pi logs ${name}`));
+		console.log(chalk.cyan(`Stop model with: pi stop ${name}`));
+	} else {
+		console.log(chalk.yellow("\n\nLog stream ended. Model may still be running."));
+		console.log(chalk.cyan(`Check status with: pi logs ${name}`));
+		console.log(chalk.cyan(`Stop model with: pi stop ${name}`));
 	}
-
-	if (!serverReady && !interrupted) {
-		console.error(chalk.red("\n✗ Connection lost or log stream ended"));
-		console.error(chalk.yellow("Server may still be running. Check with:"));
-		console.error(chalk.cyan(`  pi logs ${name}`));
-		console.error(chalk.cyan(`  pi stop ${name}`));
-		// Keep in config since it might still be running
-		return;
-	}
-
-	if (interrupted && !serverReady) {
-		// User interrupted, server still starting
-		return;
-	}
-
-	// Get pod SSH host for display
-	const sshParts = pod.ssh.split(" ");
-	const host = sshParts.find((p) => p.includes("@"))?.split("@")[1] || "unknown";
-
-	console.log("");
-	console.log(chalk.green(`✓ Model '${name}' started successfully!`));
-	console.log("");
-	console.log("Access at:");
-	console.log(chalk.cyan(`  http://${host}:${port}/v1`));
-	console.log("");
-	console.log("Test with:");
-	console.log(chalk.cyan(`  pi prompt ${name} "Hello!"`));
-	console.log("");
-	console.log("View logs:");
-	console.log(chalk.cyan(`  pi logs ${name}`));
 };
 
 /**
@@ -458,8 +327,13 @@ export const stopModel = async (name: string, options: { pod?: string }) => {
 
 	console.log(chalk.yellow(`Stopping model '${name}' on pod '${podName}'...`));
 
-	// Kill the process
-	const killCmd = `kill ${model.pid} 2>/dev/null || true`;
+	// Kill the script process and all its children
+	// Using pkill to kill the process and all children
+	const killCmd = `
+		# Kill the script process and all its children
+		pkill -TERM -P ${model.pid} 2>/dev/null || true
+		kill ${model.pid} 2>/dev/null || true
+	`;
 	await sshExec(pod.ssh, killCmd);
 
 	// Remove from config
@@ -484,9 +358,14 @@ export const stopAllModels = async (options: { pod?: string }) => {
 
 	console.log(chalk.yellow(`Stopping ${modelNames.length} model(s) on pod '${podName}'...`));
 
-	// Kill all processes
+	// Kill all script processes and their children
 	const pids = Object.values(pod.models).map((m) => m.pid);
-	const killCmd = `kill ${pids.join(" ")} 2>/dev/null || true`;
+	const killCmd = `
+		for PID in ${pids.join(" ")}; do
+			pkill -TERM -P $PID 2>/dev/null || true
+			kill $PID 2>/dev/null || true
+		done
+	`;
 	await sshExec(pod.ssh, killCmd);
 
 	// Clear all models from config
@@ -567,8 +446,24 @@ export const viewLogs = async (name: string, options: { pod?: string }) => {
 	console.log(chalk.gray("Press Ctrl+C to stop"));
 	console.log("");
 
+	// Stream logs with color preservation
+	const sshParts = pod.ssh.split(" ");
+	const sshCommand = sshParts[0]; // "ssh"
+	const sshArgs = sshParts.slice(1); // ["root@86.38.238.55"]
 	const tailCmd = `tail -f ~/.vllm_logs/${name}.log`;
-	await sshExecStream(pod.ssh, tailCmd);
+
+	const logProcess = spawn(sshCommand, [...sshArgs, tailCmd], {
+		stdio: "inherit",
+		env: {
+			...process.env,
+			FORCE_COLOR: "1",
+		},
+	});
+
+	// Wait for process to exit
+	await new Promise<void>((resolve) => {
+		logProcess.on("exit", () => resolve());
+	});
 };
 
 /**
@@ -730,59 +625,4 @@ export const showKnownModels = async () => {
 
 	console.log(chalk.gray("\nFor unknown models, defaults to single GPU deployment."));
 	console.log(chalk.gray("Use --vllm to pass custom arguments to vLLM."));
-};
-
-/**
- * Test a model with a prompt
- */
-export const promptModel = async (name: string, message: string, options: { pod?: string }) => {
-	const { name: podName, pod } = getPod(options.pod);
-
-	const model = pod.models[name];
-	if (!model) {
-		console.error(chalk.red(`Model '${name}' not found on pod '${podName}'`));
-		process.exit(1);
-	}
-
-	// Simple curl test for now
-	const curlCmd = `
-		curl -s http://localhost:${model.port}/v1/chat/completions \
-			-H "Content-Type: application/json" \
-			-H "Authorization: Bearer ${process.env.VLLM_API_KEY}" \
-			-d '{
-				"model": "${model.model}",
-				"messages": [{"role": "user", "content": ${JSON.stringify(message)}}],
-				"max_tokens": 500,
-				"temperature": 0.7
-			}'
-	`;
-
-	console.log(chalk.green(`Testing model '${name}'...`));
-	console.log(chalk.gray(`User: ${message}`));
-	console.log("");
-
-	const result = await sshExec(pod.ssh, curlCmd);
-	if (result.exitCode !== 0) {
-		console.error(chalk.red("Request failed"));
-		console.error(result.stderr);
-		process.exit(1);
-	}
-
-	try {
-		const response = JSON.parse(result.stdout);
-		if (response.choices[0]) {
-			const content = response.choices[0].message.content;
-			console.log(chalk.green("Assistant:"));
-			console.log(content);
-		} else if (response.error) {
-			console.error(chalk.red("API Error:"));
-			console.error(response.error);
-		} else {
-			console.log("Response:");
-			console.log(JSON.stringify(response, null, 2));
-		}
-	} catch (e) {
-		console.error(chalk.red("Failed to parse response"));
-		console.log(result.stdout);
-	}
 };
