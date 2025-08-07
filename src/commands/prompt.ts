@@ -58,9 +58,8 @@ const display = {
 		console.log();
 	},
 
-	user: (text: string) => {
+	user: () => {
 		console.log(chalk.bgGreen.white("[user]"));
-		console.log(text);
 		console.log();
 	},
 
@@ -372,7 +371,7 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 				break;
 			}
 
-			display.user(input);
+			display.user();
 			messages.push({ role: "user", content: input });
 
 			try {
@@ -403,8 +402,8 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 				break;
 			}
 
-			// Display user message
-			display.user(userMessage);
+			// Display user label
+			display.user();
 			messages.push({ role: "user", content: userMessage });
 
 			try {
