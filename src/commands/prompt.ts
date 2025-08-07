@@ -1,7 +1,9 @@
+import { tool } from "ai";
 import chalk from "chalk";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import OpenAI from "openai";
+import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
 import { resolve } from "path";
 import * as readline from "readline/promises";
 import { getActivePod, loadConfig } from "../config.js";
@@ -53,7 +55,7 @@ const display = {
 	},
 
 	assistantLabel: () => {
-		console.log(chalk.bgHex("#FFA500").white("[assistant]"));
+		console.log(chalk.hex("#FFA500")("[assistant]"));
 	},
 
 	assistantMessage: (text: string) => {
@@ -63,12 +65,12 @@ const display = {
 
 	user: (text?: string) => {
 		if (text) {
-			console.log(chalk.bgGreen.white("[user]"));
+			console.log(chalk.green("[user]"));
 			console.log(text);
 			console.log(); // Extra newline after user message
 		} else {
 			// For interactive mode - just the label since text is already shown
-			console.log(chalk.bgGreen.white("[user]"));
+			console.log(chalk.green("[user]"));
 			console.log();
 		}
 	},
@@ -180,12 +182,7 @@ async function executeTool(name: string, args: string): Promise<string> {
 // Model communication
 // ────────────────────────────────────────────────────────────────────────────────
 
-async function callGptOssModel(client: OpenAI, model: string, messages: any[]): Promise<string | null> {
-	const input: any[] = messages.map((m) => ({
-		role: m.role,
-		content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-	}));
-
+async function callGptOssModel(client: OpenAI, model: string, messages: any[]): Promise<void> {
 	// Show assistant label at the start
 	display.assistantLabel();
 
@@ -195,62 +192,83 @@ async function callGptOssModel(client: OpenAI, model: string, messages: any[]): 
 	for (let round = 0; round < maxRounds && !conversationDone; round++) {
 		const response = await client.responses.create({
 			model,
-			input,
+			input: messages,
 			tools: toolsForResponses,
 			tool_choice: "auto",
 			max_output_tokens: 2000,
 		} as any);
 
-		const output = response.output as any[];
+		const output = response.output;
 		if (!output) break;
 
+		// Now process the output for display and tool execution
+		const toolCalls: any[] = [];
+
+		const executeToolCall = async (toolCall: ToolCall) => {
+			try {
+				display.tool(toolCall.name, toolCall.arguments);
+				const result = await executeTool(toolCall.name, toolCall.arguments);
+				display.toolResult(result);
+
+				// Add tool result to messages
+				messages.push({
+					type: "function_call_output",
+					call_id: toolCall.id,
+					output: result,
+				} as ResponseFunctionToolCallOutputItem);
+			} catch (e: any) {
+				display.toolResult(e.message, true);
+				messages.push({
+					type: "function_call_output",
+					call_id: toolCall.id,
+					output: e.message,
+				});
+			}
+		};
+
 		for (const item of output) {
+			// vLLM+gpt-oss quirk: remove 'type' field from message items to avoid 400 errors
+			if (item.type === "message") {
+				const { type, ...messageWithoutType } = item;
+				messages.push(messageWithoutType);
+			} else {
+				messages.push(item);
+			}
+
 			switch (item.type) {
 				case "reasoning": {
-					const text = item.content?.find((c: any) => c.type === "reasoning_text")?.text;
-					if (text) {
-						display.thinking(text);
+					for (const content of item.content || []) {
+						if (content.type === "reasoning_text") {
+							display.thinking(content.text);
+						}
 					}
 					break;
 				}
 
 				case "message": {
-					const text = item.content?.find((c: any) => c.type === "output_text")?.text;
-					if (text) {
-						display.assistantMessage(text);
+					for (const content of item.content || []) {
+						if (content.type === "output_text") {
+							display.assistantMessage(content.text);
+						} else if (content.type === "refusal") {
+							display.error(`Refusal: ${content.refusal}`);
+						}
 						conversationDone = true;
-						return text;
 					}
 					break;
 				}
 
 				case "function_call": {
-					const toolCall: ToolCall = {
+					// Execute tool call and add result
+					await executeToolCall({
 						name: item.name,
 						arguments: item.arguments,
-						id: item.call_id || item.id,
-					};
+						id: item.call_id,
+					});
+					break;
+				}
 
-					display.tool(toolCall.name, toolCall.arguments);
-
-					try {
-						const result = await executeTool(toolCall.name, toolCall.arguments);
-						display.toolResult(result);
-
-						// Add tool result to conversation
-						input.push({
-							type: "function_call_output",
-							call_id: toolCall.id,
-							output: result,
-						});
-					} catch (e: any) {
-						display.toolResult(e.message, true);
-						input.push({
-							type: "function_call_output",
-							call_id: toolCall.id,
-							output: e.message,
-						});
-					}
+				default: {
+					display.error(`Unknown output type in LLM response: ${item.type}`);
 					break;
 				}
 			}
@@ -260,15 +278,9 @@ async function callGptOssModel(client: OpenAI, model: string, messages: any[]): 
 	if (!conversationDone) {
 		display.error("Max rounds reached without completion");
 	}
-	return null;
 }
 
-async function callChatModel(client: OpenAI, model: string, messages: any[]): Promise<string | null> {
-	const formattedMessages = messages.map((m) => ({
-		role: m.role,
-		content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-	}));
-
+async function callChatModel(client: OpenAI, model: string, messages: any[]): Promise<void> {
 	// Show assistant label at the start
 	display.assistantLabel();
 
@@ -278,7 +290,7 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 	for (let round = 0; round < maxRounds && !assistantResponded; round++) {
 		const response = await client.chat.completions.create({
 			model,
-			messages: formattedMessages,
+			messages,
 			tools: toolsForChat as any,
 			tool_choice: "auto",
 			temperature: 0.7,
@@ -288,46 +300,50 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 		const message = response.choices[0].message;
 
 		if (message.tool_calls && message.tool_calls.length > 0) {
+			// Add assistant message with tool calls to history
+			const assistantMsg: any = {
+				role: "assistant",
+				content: message.content || null,
+				tool_calls: message.tool_calls,
+			};
+			messages.push(assistantMsg);
+
+			// Display and execute each tool call
 			for (const toolCall of message.tool_calls) {
-				const funcName = "function" in toolCall ? toolCall.function.name : (toolCall as any).name;
-				const funcArgs = "function" in toolCall ? toolCall.function.arguments : (toolCall as any).arguments;
+				const funcName = toolCall.type === "function" ? toolCall.function.name : toolCall.custom.name;
+				const funcArgs = toolCall.type === "function" ? toolCall.function.arguments : toolCall.custom.input;
 				display.tool(funcName, funcArgs);
 
 				try {
 					const result = await executeTool(funcName, funcArgs);
 					display.toolResult(result);
 
-					formattedMessages.push({
+					// Add tool result to messages
+					messages.push({
 						role: "tool",
 						tool_call_id: toolCall.id,
 						content: result,
-					} as any);
+					});
 				} catch (e: any) {
 					display.toolResult(e.message, true);
-					formattedMessages.push({
+					messages.push({
 						role: "tool",
 						tool_call_id: toolCall.id,
 						content: e.message,
-					} as any);
+					});
 				}
 			}
-
-			// Add the assistant's message with tool calls to history
-			formattedMessages.push({
-				role: "assistant",
-				tool_calls: message.tool_calls,
-			} as any);
 		} else if (message.content) {
+			// Final assistant response
 			display.assistantMessage(message.content);
+			messages.push({ role: "assistant", content: message.content });
 			assistantResponded = true;
-			return message.content;
 		}
 	}
 
 	if (!assistantResponded) {
 		display.error("Max rounds reached without response");
 	}
-	return null;
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -335,11 +351,7 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 // ────────────────────────────────────────────────────────────────────────────────
 
 export async function promptModel(modelName: string, userMessages: string[] | undefined, opts: PromptOptions = {}) {
-	// Set up SIGINT handler to exit cleanly
-	process.on("SIGINT", () => {
-		console.log("\n" + chalk.gray("Interrupted."));
-		process.exit(0);
-	});
+	// Remove the SIGINT handler - it's preventing normal Ctrl+C behavior
 
 	// Get pod and model configuration
 	const activePod = opts.pod ? { name: opts.pod, pod: loadConfig().pods[opts.pod] } : getActivePod();
@@ -383,21 +395,32 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 
 		console.log(chalk.gray("Interactive mode. CTRL + C to quit.\n"));
 
-		const messages: any[] = [{ role: "system", content: systemPrompt }];
+		// Different conversation formats for different APIs
+		let conversation: any[];
+
+		if (isGptOss) {
+			// Responses API uses 'input' array with different format
+			conversation = [{ role: "system", content: systemPrompt }];
+		} else {
+			// Chat API uses 'messages' array
+			conversation = [{ role: "system", content: systemPrompt }];
+		}
 
 		while (true) {
-			console.log(chalk.bgGreen.white("[user]"));
-			const input = await rl.question(`${chalk.green("> ")}`);
+			console.log(chalk.green("[user]"));
+			const userInput = await rl.question(`${chalk.green("> ")}`);
 			console.log();
 
-			// Don't display user message again - it's already shown by readline
-			messages.push({ role: "user", content: input });
+			// Add user message to conversation
+			conversation.push({ role: "user", content: userInput });
 
 			try {
 				if (isGptOss) {
-					await callGptOssModel(client, modelConfig.model, messages);
+					// For responses API, modifies the input array directly
+					await callGptOssModel(client, modelConfig.model, conversation);
 				} else {
-					await callChatModel(client, modelConfig.model, messages);
+					// For chat API, modifies the messages array directly
+					await callChatModel(client, modelConfig.model, conversation);
 				}
 			} catch (e: any) {
 				display.error(e.message);
@@ -410,7 +433,16 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 			process.exit(1);
 		}
 
-		const messages: any[] = [{ role: "system", content: systemPrompt }];
+		// Different conversation formats for different APIs
+		let conversation: any[];
+
+		if (isGptOss) {
+			// Responses API uses 'input' array
+			conversation = [{ role: "system", content: systemPrompt }];
+		} else {
+			// Chat API uses 'messages' array
+			conversation = [{ role: "system", content: systemPrompt }];
+		}
 
 		for (const userMessage of userMessages) {
 			// Check for exit command
@@ -421,19 +453,15 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 
 			// Display user message for single-shot mode
 			display.user(userMessage);
-			messages.push({ role: "user", content: userMessage });
+			conversation.push({ role: "user", content: userMessage });
 
 			try {
-				let assistantResponse: string | null = null;
 				if (isGptOss) {
-					assistantResponse = await callGptOssModel(client, modelConfig.model, messages);
+					// For responses API, modifies the input array directly
+					await callGptOssModel(client, modelConfig.model, conversation);
 				} else {
-					assistantResponse = await callChatModel(client, modelConfig.model, messages);
-				}
-
-				// Add assistant's response to conversation history
-				if (assistantResponse) {
-					messages.push({ role: "assistant", content: assistantResponse });
+					// For chat API, modifies the messages array directly
+					await callChatModel(client, modelConfig.model, conversation);
 				}
 
 				// Add separator between prompts if not the last one
