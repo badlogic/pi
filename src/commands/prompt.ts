@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import chalk from "chalk";
 import { execSync } from "child_process";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { glob } from "glob";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
@@ -23,6 +23,47 @@ interface ToolCall {
 	name: string;
 	arguments: string;
 	id: string;
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Logging utilities
+// ────────────────────────────────────────────────────────────────────────────────
+
+function logMessages(messages: any[], context: string) {
+	const timestamp = new Date().toISOString();
+	const logEntry = {
+		timestamp,
+		context,
+		messages: JSON.parse(JSON.stringify(messages)), // Deep clone to avoid mutations
+	};
+
+	try {
+		// Append to prompts.json (create if doesn't exist)
+		const logFile = "prompts.json";
+		let logs = [];
+
+		if (existsSync(logFile)) {
+			try {
+				const content = readFileSync(logFile, "utf8");
+				logs = JSON.parse(content);
+			} catch (e) {
+				// If file is corrupted, start fresh
+				logs = [];
+			}
+		}
+
+		logs.push(logEntry);
+
+		// Keep only last 100 entries to prevent file from growing too large
+		if (logs.length > 100) {
+			logs = logs.slice(-100);
+		}
+
+		writeFileSync(logFile, JSON.stringify(logs, null, 2));
+	} catch (e) {
+		// Silently fail logging - don't interrupt the main flow
+		console.error(chalk.dim(`[log error] ${e}`));
+	}
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -271,10 +312,16 @@ async function callGptOssModel(client: OpenAI, model: string, messages: any[]): 
 	// Show assistant label at the start
 	display.assistantLabel();
 
+	// Log initial messages
+	logMessages(messages, "callGptOssModel:initial");
+
 	let conversationDone = false;
 	const maxRounds = 10000;
 
 	for (let round = 0; round < maxRounds && !conversationDone; round++) {
+		// Log before API call
+		logMessages(messages, `callGptOssModel:before_api_round_${round}`);
+
 		const response = await client.responses.create({
 			model,
 			input: messages,
@@ -301,6 +348,7 @@ async function callGptOssModel(client: OpenAI, model: string, messages: any[]): 
 					call_id: toolCall.id,
 					output: result,
 				} as ResponseFunctionToolCallOutputItem);
+				logMessages(messages, `callGptOssModel:after_tool_${toolCall.name}_success`);
 			} catch (e: any) {
 				display.toolResult(e.message, true);
 				messages.push({
@@ -308,6 +356,7 @@ async function callGptOssModel(client: OpenAI, model: string, messages: any[]): 
 					call_id: toolCall.id,
 					output: e.message,
 				});
+				logMessages(messages, `callGptOssModel:after_tool_${toolCall.name}_error`);
 			}
 		};
 
@@ -316,8 +365,10 @@ async function callGptOssModel(client: OpenAI, model: string, messages: any[]): 
 			if (item.type === "message") {
 				const { type, ...messageWithoutType } = item;
 				messages.push(messageWithoutType);
+				logMessages(messages, `callGptOssModel:pushed_message_without_type`);
 			} else {
 				messages.push(item);
+				logMessages(messages, `callGptOssModel:pushed_${item.type}`);
 			}
 
 			switch (item.type) {
@@ -369,10 +420,16 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 	// Show assistant label at the start
 	display.assistantLabel();
 
+	// Log initial messages
+	logMessages(messages, "callChatModel:initial");
+
 	const maxRounds = 10000;
 	let assistantResponded = false;
 
 	for (let round = 0; round < maxRounds && !assistantResponded; round++) {
+		// Log before API call
+		logMessages(messages, `callChatModel:before_api_round_${round}`);
+
 		const response = await client.chat.completions.create({
 			model,
 			messages,
@@ -392,6 +449,7 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 				tool_calls: message.tool_calls,
 			};
 			messages.push(assistantMsg);
+			logMessages(messages, `callChatModel:pushed_assistant_with_tools`);
 
 			// Display and execute each tool call
 			for (const toolCall of message.tool_calls) {
@@ -409,6 +467,7 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 						tool_call_id: toolCall.id,
 						content: result,
 					});
+					logMessages(messages, `callChatModel:after_tool_${funcName}_success`);
 				} catch (e: any) {
 					display.toolResult(e.message, true);
 					messages.push({
@@ -416,12 +475,14 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 						tool_call_id: toolCall.id,
 						content: e.message,
 					});
+					logMessages(messages, `callChatModel:after_tool_${funcName}_error`);
 				}
 			}
 		} else if (message.content) {
 			// Final assistant response
 			display.assistantMessage(message.content);
 			messages.push({ role: "assistant", content: message.content });
+			logMessages(messages, `callChatModel:pushed_final_assistant_response`);
 			assistantResponded = true;
 		}
 	}
@@ -510,6 +571,7 @@ Current working directory: ${process.cwd()}
 
 			// Add user message to conversation
 			conversation.push({ role: "user", content: userInput });
+			logMessages(conversation, "interactive:added_user_message");
 
 			try {
 				if (isGptOss) {
@@ -520,6 +582,7 @@ Current working directory: ${process.cwd()}
 					await callChatModel(client, modelConfig.model, conversation);
 				}
 			} catch (e: any) {
+				logMessages(conversation, `interactive:error_${e.status || "unknown"}`);
 				display.error(e.message);
 			}
 		}
@@ -551,6 +614,7 @@ Current working directory: ${process.cwd()}
 			// Display user message for single-shot mode
 			display.user(userMessage);
 			conversation.push({ role: "user", content: userMessage });
+			logMessages(conversation, `single_shot:added_user_message_${userMessages.indexOf(userMessage)}`);
 
 			try {
 				if (isGptOss) {
@@ -567,6 +631,10 @@ Current working directory: ${process.cwd()}
 					console.log(chalk.gray("─".repeat(50)));
 				}
 			} catch (e: any) {
+				logMessages(
+					conversation,
+					`single_shot:error_${e.status || "unknown"}_message_${userMessages.indexOf(userMessage)}`,
+				);
 				display.error(e.message);
 				// Continue with next prompt instead of exiting
 			}

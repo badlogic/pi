@@ -13,3 +13,4 @@ dist/
 coverage/
 .nyc_output/
 .pi_config/
+prompts.json
