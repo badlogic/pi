@@ -7,6 +7,7 @@ STORAGE_MOUNT=""
 MODELS_PATH=""
 HF_TOKEN=""
 VLLM_API_KEY=""
+VLLM_VERSION="release"  # Default to release
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -24,6 +25,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --vllm-api-key)
             VLLM_API_KEY="$2"
+            shift 2
+            ;;
+        --vllm)
+            VLLM_VERSION="$2"
             shift 2
             ;;
         *)
@@ -145,11 +150,51 @@ uv pip install torch --torch-backend=auto || {
     exit 1
 }
 
-echo "Installing vLLM..."
-uv pip install vllm>=0.10.0 || {
-    echo "ERROR: Failed to install vLLM"
-    exit 1
-}
+echo "Installing vLLM (version: $VLLM_VERSION)..."
+case "$VLLM_VERSION" in
+    release)
+        echo "Installing latest vLLM release (>=0.10.0)..."
+        uv pip install vllm>=0.10.0 || {
+            echo "ERROR: Failed to install vLLM"
+            exit 1
+        }
+        ;;
+    source)
+        echo "Installing vLLM from source (latest main branch)..."
+        echo "This will take 10-15 minutes..."
+        # Install build dependencies
+        uv pip install ninja packaging setuptools || {
+            echo "ERROR: Failed to install build dependencies"
+            exit 1
+        }
+        # Clone and install from source
+        cd /tmp
+        rm -rf vllm
+        git clone https://github.com/vllm-project/vllm.git || {
+            echo "ERROR: Failed to clone vLLM repository"
+            exit 1
+        }
+        cd vllm
+        uv pip install -e . || {
+            echo "ERROR: Failed to build vLLM from source"
+            exit 1
+        }
+        cd /
+        ;;
+    gpt-oss)
+        echo "Installing GPT-OSS special vLLM build..."
+        echo "WARNING: This build is ONLY for GPT-OSS models!"
+        # Install vLLM with GPT-OSS MXFP4 quantization support
+        uv pip install vllm @ git+https://github.com/NX-AI/vllm.git@gpt-oss-mx || {
+            echo "ERROR: Failed to install GPT-OSS vLLM build"
+            exit 1
+        }
+        ;;
+    *)
+        echo "ERROR: Unknown vLLM version: $VLLM_VERSION"
+        exit 1
+        ;;
+esac
 
 # --- Install additional packages ---------------------------------------------
 echo "Installing additional packages..."

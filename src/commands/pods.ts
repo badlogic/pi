@@ -27,9 +27,13 @@ export const listPods = () => {
 		const marker = isActive ? chalk.green("*") : " ";
 		const gpuCount = pod.gpus?.length || 0;
 		const gpuInfo = gpuCount > 0 ? `${gpuCount}x ${pod.gpus[0].name}` : "no GPUs detected";
-		console.log(`${marker} ${chalk.bold(name)} - ${gpuInfo} - ${pod.ssh}`);
+		const vllmInfo = pod.vllmVersion ? ` (vLLM: ${pod.vllmVersion})` : "";
+		console.log(`${marker} ${chalk.bold(name)} - ${gpuInfo}${vllmInfo} - ${pod.ssh}`);
 		if (pod.modelsPath) {
 			console.log(`    Models: ${pod.modelsPath}`);
+		}
+		if (pod.vllmVersion === "gpt-oss") {
+			console.log(chalk.yellow(`    ⚠️  GPT-OSS build - only for GPT-OSS models`));
 		}
 	}
 };
@@ -37,7 +41,11 @@ export const listPods = () => {
 /**
  * Setup a new pod
  */
-export const setupPod = async (name: string, sshCmd: string, options: { storage?: string; modelsPath?: string }) => {
+export const setupPod = async (
+	name: string,
+	sshCmd: string,
+	options: { storage?: string; modelsPath?: string; vllm?: "release" | "source" | "gpt-oss" },
+) => {
 	// Validate environment variables
 	const hfToken = process.env.HF_TOKEN;
 	const vllmApiKey = process.env.VLLM_API_KEY;
@@ -72,6 +80,9 @@ export const setupPod = async (name: string, sshCmd: string, options: { storage?
 	console.log(chalk.green(`Setting up pod '${name}'...`));
 	console.log(`SSH: ${sshCmd}`);
 	console.log(`Models path: ${modelsPath}`);
+	console.log(
+		`vLLM version: ${options.vllm || "release"} ${options.vllm === "gpt-oss" ? chalk.yellow("(GPT-OSS special build)") : ""}`,
+	);
 	if (options.storage) {
 		console.log(`Storage mount: ${options.storage}`);
 	}
@@ -102,6 +113,9 @@ export const setupPod = async (name: string, sshCmd: string, options: { storage?
 	if (options.storage) {
 		setupCmd += ` --storage-mount '${options.storage}'`;
 	}
+	// Add vLLM version flag
+	const vllmVersion = options.vllm || "release";
+	setupCmd += ` --vllm '${vllmVersion}'`;
 
 	// Run setup script
 	console.log("");
@@ -146,6 +160,7 @@ export const setupPod = async (name: string, sshCmd: string, options: { storage?
 		gpus,
 		models: {},
 		modelsPath,
+		vllmVersion: options.vllm || "release",
 	};
 
 	addPod(name, pod);

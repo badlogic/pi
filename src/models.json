@@ -218,37 +218,6 @@
 				}
 			]
 		},
-		"zai-org/GLM-4.5-Air": {
-			"name": "GLM-4.5-Air",
-			"configs": [
-				{
-					"gpuCount": 4,
-					"gpuTypes": ["H100"],
-					"args": [
-						"--tensor-parallel-size",
-						"4",
-						"--tool-call-parser",
-						"glm4_moe",
-						"--reasoning-parser",
-						"glm4_moe",
-						"--enable-auto-tool-choice"
-					]
-				},
-				{
-					"gpuCount": 2,
-					"gpuTypes": ["H200"],
-					"args": [
-						"--tensor-parallel-size",
-						"2",
-						"--tool-call-parser",
-						"glm4_moe",
-						"--reasoning-parser",
-						"glm4_moe",
-						"--enable-auto-tool-choice"
-					]
-				}
-			]
-		},
 		"zai-org/GLM-4.5-Air-FP8": {
 			"name": "GLM-4.5-Air-FP8",
 			"configs": [
@@ -262,12 +231,14 @@
 						"glm4_moe",
 						"--reasoning-parser",
 						"glm4_moe",
-						"--enable-auto-tool-choice"
+						"--enable-auto-tool-choice",
+						"--quantization",
+						"fp8"
 					],
 					"env": {
 						"VLLM_ATTENTION_BACKEND": "XFORMERS"
 					},
-					"notes": "Uses XFORMERS backend to avoid FlashInfer issues"
+					"notes": "FP8 model requires vLLM with proper FP8 support or MTP module"
 				},
 				{
 					"gpuCount": 1,
@@ -277,12 +248,47 @@
 						"glm4_moe",
 						"--reasoning-parser",
 						"glm4_moe",
-						"--enable-auto-tool-choice"
+						"--enable-auto-tool-choice",
+						"--quantization",
+						"fp8"
 					],
 					"env": {
 						"VLLM_ATTENTION_BACKEND": "XFORMERS"
 					},
-					"notes": "Uses XFORMERS backend to avoid FlashInfer issues"
+					"notes": "FP8 model requires vLLM with proper FP8 support or MTP module"
+				}
+			]
+		},
+		"zai-org/GLM-4.5-Air": {
+			"name": "GLM-4.5-Air",
+			"configs": [
+				{
+					"gpuCount": 2,
+					"gpuTypes": ["H100", "H200"],
+					"args": [
+						"--tensor-parallel-size",
+						"2",
+						"--tool-call-parser",
+						"glm4_moe",
+						"--reasoning-parser",
+						"glm4_moe",
+						"--enable-auto-tool-choice"
+					],
+					"notes": "Non-quantized BF16 version, more compatible"
+				},
+				{
+					"gpuCount": 1,
+					"gpuTypes": ["H200"],
+					"args": [
+						"--tool-call-parser",
+						"glm4_moe",
+						"--reasoning-parser",
+						"glm4_moe",
+						"--enable-auto-tool-choice",
+						"--gpu-memory-utilization",
+						"0.95"
+					],
+					"notes": "Single H200 can fit the BF16 model with high memory utilization"
 				}
 			]
 		},

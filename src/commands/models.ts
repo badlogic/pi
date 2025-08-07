@@ -137,6 +137,20 @@ export const startModel = async (
 		console.log(chalk.gray("Unknown model, defaulting to single GPU"));
 	}
 
+	// Warn about vLLM version compatibility
+	if (pod.vllmVersion === "gpt-oss" && !modelId.toLowerCase().includes("gpt-oss")) {
+		console.log(chalk.yellow("⚠️  WARNING: This pod has the GPT-OSS special vLLM build installed."));
+		console.log(chalk.yellow("   Non-GPT-OSS models may not work correctly."));
+		console.log("");
+	} else if (pod.vllmVersion === "source" && modelId.toLowerCase().includes("glm-4.5")) {
+		console.log(chalk.green("✓ This pod has vLLM built from source, which should support GLM-4.5 models."));
+		console.log("");
+	} else if (pod.vllmVersion === "release" && modelId.toLowerCase().includes("glm-4.5") && modelId.includes("FP8")) {
+		console.log(chalk.yellow("⚠️  WARNING: GLM-4.5 FP8 models may require vLLM built from source."));
+		console.log(chalk.yellow("   Consider setting up the pod with --vllm source"));
+		console.log("");
+	}
+
 	console.log(chalk.green(`Starting model '${name}' on pod '${podName}'...`));
 	console.log(`Model: ${modelId}`);
 	if (isKnown && !options.vllmArgs) {

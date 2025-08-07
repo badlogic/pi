@@ -19,6 +19,10 @@ function printHelp() {
 
 Pod Management:
   pi pods setup <name> "<ssh>" --storage "<mount>"  Setup pod with storage mount
+    Options:
+      --vllm release    Install latest vLLM release >=0.10.0 (default)
+      --vllm source     Install vLLM from latest source (for GLM-4.5 etc)
+      --vllm gpt-oss    Install special GPT-OSS version (see docs/gpt-oss.md)
   pi pods                                           List all pods (* = active)
   pi pods active <name>                             Switch active pod
   pi pods remove <name>                             Remove pod from local config
@@ -65,23 +69,35 @@ try {
 			// pi pods - list all pods
 			listPods();
 		} else if (subcommand === "setup") {
-			// pi pods setup <name> "<ssh>" [--storage "<mount>"] [--models-path <path>]
+			// pi pods setup <name> "<ssh>" [--storage "<mount>"] [--models-path <path>] [--vllm release|source|gpt-oss]
 			const name = args[2];
 			const sshCmd = args[3];
 
 			if (!name || !sshCmd) {
-				console.error('Usage: pi pods setup <name> "<ssh>" [--storage "<mount>"] [--models-path <path>]');
+				console.error(
+					'Usage: pi pods setup <name> "<ssh>" [--storage "<mount>"] [--models-path <path>] [--vllm release|source|gpt-oss]',
+				);
 				process.exit(1);
 			}
 
 			// Parse options
-			const options: { storage?: string; modelsPath?: string } = {};
+			const options: { storage?: string; modelsPath?: string; vllm?: "release" | "source" | "gpt-oss" } = {};
 			for (let i = 4; i < args.length; i++) {
 				if (args[i] === "--storage" && i + 1 < args.length) {
 					options.storage = args[i + 1];
 					i++;
 				} else if (args[i] === "--models-path" && i + 1 < args.length) {
 					options.modelsPath = args[i + 1];
+					i++;
+				} else if (args[i] === "--vllm" && i + 1 < args.length) {
+					const vllmType = args[i + 1];
+					if (vllmType === "release" || vllmType === "source" || vllmType === "gpt-oss") {
+						options.vllm = vllmType;
+					} else {
+						console.error(chalk.red(`Invalid vLLM type: ${vllmType}`));
+						console.error("Valid options: release, source, gpt-oss");
+						process.exit(1);
+					}
 					i++;
 				}
 			}
