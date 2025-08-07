@@ -1,0 +1,18 @@
+{
+  "providers": {
+    "ollama": {
+      "name": "Ollama",
+      "base_url": "http://86.38.238.24:8001/v1",
+      "api_key": "wow2025",
+      "type": "openai",
+      "models": [
+        {
+          "name": "qwn3-coder 30b",
+          "id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+          "context_window": 124000,
+          "default_max_tokens": 10000
+        }
+      ]
+    }
+  }
+}

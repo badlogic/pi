@@ -7,6 +7,7 @@ const fs = require('fs');
 const { execSync, spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
+const PromptCommand = require('./prompt');
 
 const CONFIG_FILE = path.join(os.homedir(), '.pi_config');
 const SCRIPT_DIR = __dirname;
@@ -14,6 +15,7 @@ const SCRIPT_DIR = __dirname;
 class PiCli {
     constructor() {
         this.loadConfig();
+        this.promptCommand = new PromptCommand(this);
     }
 
     loadConfig() {
@@ -1177,42 +1179,7 @@ class PiCli {
     }
 
     async prompt(name, message, podName = null) {
-        // Get model info
-        const models = this.getRunningModels(podName);
-        const model = models[name];
-
-        if (!model || !model.url) {
-            console.error(`Model '${name}' is not running${podName ? ` on pod '${podName}'` : ''}`);
-            console.error('Running models:', Object.keys(models).join(', ') || 'none');
-            process.exit(1);
-        }
-
-        // Make API call directly to the model's external URL
-        const url = `${model.url}/chat/completions`;
-        const payload = {
-            model: model.model_id,
-            messages: [{ role: 'user', content: message }],
-            max_tokens: 500,
-            temperature: 0.7
-        };
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-            }
-
-            const data = await response.json();
-            console.log(data.choices[0].message.content);
-        } catch (error) {
-            console.error('Error:', error.message);
-            process.exit(1);
-        }
+        await this.promptCommand.execute(name, message, podName);
     }
 
     showHelp() {

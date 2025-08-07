@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ollama-server": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "GPT-OSS-20B",
+      "options": {
+        "baseURL": "http://86.38.238.24:8001/v1",
+        "apiKey": "wow2025"
+      },
+      "models": {
+        "Qwen/Qwen3-Coder-30B-A3B-Instruct": {
+          "name": "qwen3-coder 30b"
+        }
+      }
+    }
+  }
+}

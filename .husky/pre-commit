@@ -1,0 +1,23 @@
+#!/bin/sh
+
+# Run npm check
+echo "Running npm run check..."
+npm run check
+
+# If check fails, exit
+if [ $? -ne 0 ]; then
+  echo "npm run check failed. Commit aborted."
+  exit 1
+fi
+
+# Get list of modified files (not deleted)
+MODIFIED_FILES=$(git diff --cached --name-only --diff-filter=M)
+
+if [ -n "$MODIFIED_FILES" ]; then
+  echo "Restaging modified files..."
+  # Add only the modified files back to staging
+  echo "$MODIFIED_FILES" | xargs git add
+  echo "Modified files have been restaged."
+fi
+
+exit 0

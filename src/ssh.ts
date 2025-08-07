@@ -10,23 +10,23 @@ export interface SSHResult {
  * Execute an SSH command and return the result
  */
 export const sshExec = async (
-	sshCmd: string, 
+	sshCmd: string,
 	command: string,
-	options?: { keepAlive?: boolean }
+	options?: { keepAlive?: boolean },
 ): Promise<SSHResult> => {
 	return new Promise((resolve) => {
 		// Parse SSH command (e.g., "ssh root@1.2.3.4" or "ssh -p 22 root@1.2.3.4")
 		const sshParts = sshCmd.split(" ").filter((p) => p);
 		const sshBinary = sshParts[0];
 		let sshArgs = [...sshParts.slice(1)];
-		
+
 		// Add SSH keepalive options for long-running commands
 		if (options?.keepAlive) {
 			// ServerAliveInterval=30 sends keepalive every 30 seconds
 			// ServerAliveCountMax=120 allows up to 120 failures (60 minutes total)
 			sshArgs = ["-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=120", ...sshArgs];
 		}
-		
+
 		sshArgs.push(command);
 
 		const proc = spawn(sshBinary, sshArgs, {
@@ -73,22 +73,22 @@ export const sshExecStream = async (
 	return new Promise((resolve) => {
 		const sshParts = sshCmd.split(" ").filter((p) => p);
 		const sshBinary = sshParts[0];
-		
+
 		// Build SSH args
 		let sshArgs = [...sshParts.slice(1)];
-		
+
 		// Add -t flag if requested and not already present
 		if (options?.forceTTY && !sshParts.includes("-t")) {
 			sshArgs = ["-t", ...sshArgs];
 		}
-		
+
 		// Add SSH keepalive options for long-running commands
 		if (options?.keepAlive) {
 			// ServerAliveInterval=30 sends keepalive every 30 seconds
 			// ServerAliveCountMax=120 allows up to 120 failures (60 minutes total)
 			sshArgs = ["-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=120", ...sshArgs];
 		}
-		
+
 		sshArgs.push(command);
 
 		const spawnOptions: SpawnOptions = options?.silent
