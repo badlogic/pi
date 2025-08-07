@@ -141,6 +141,11 @@ export const startModel = async (
 	if (pod.vllmVersion === "gpt-oss" && !modelId.toLowerCase().includes("gpt-oss")) {
 		console.log(chalk.yellow("⚠️  WARNING: This pod has the GPT-OSS special vLLM build installed."));
 		console.log(chalk.yellow("   Non-GPT-OSS models may not work correctly."));
+		console.log(chalk.yellow("   This build includes PyTorch nightly and other cutting-edge dependencies."));
+		console.log("");
+	} else if (modelId.toLowerCase().includes("gpt-oss") && pod.vllmVersion !== "gpt-oss") {
+		console.log(chalk.yellow("⚠️  WARNING: GPT-OSS models require the special GPT-OSS vLLM build."));
+		console.log(chalk.yellow("   Set up a pod with: pi pods setup <name> <ssh> --vllm gpt-oss"));
 		console.log("");
 	} else if (pod.vllmVersion === "source" && modelId.toLowerCase().includes("glm-4.5")) {
 		console.log(chalk.green("✓ This pod has vLLM built from source, which should support GLM-4.5 models."));

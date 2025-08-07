@@ -21,8 +21,8 @@ Pod Management:
   pi pods setup <name> "<ssh>" --storage "<mount>"  Setup pod with storage mount
     Options:
       --vllm release    Install latest vLLM release >=0.10.0 (default)
-      --vllm source     Install vLLM from latest source (for GLM-4.5 etc)
-      --vllm gpt-oss    Install special GPT-OSS version (see docs/gpt-oss.md)
+      --vllm source     Build vLLM from latest GitHub source (for GLM-4.5 etc)
+      --vllm gpt-oss    Install vLLM 0.10.1+gptoss with PyTorch nightly (GPT-OSS only)
   pi pods                                           List all pods (* = active)
   pi pods active <name>                             Switch active pod
   pi pods remove <name>                             Remove pod from local config

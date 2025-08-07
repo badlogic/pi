@@ -184,10 +184,21 @@ case "$VLLM_VERSION" in
     gpt-oss)
         echo "Installing GPT-OSS special vLLM build..."
         echo "WARNING: This build is ONLY for GPT-OSS models!"
-        # Install vLLM with GPT-OSS MXFP4 quantization support
-        uv pip install vllm @ git+https://github.com/NX-AI/vllm.git@gpt-oss-mx || {
+        echo "Installing cutting-edge dependencies for GPT-OSS support..."
+        
+        # Install the GPT-OSS prerelease version with special dependencies
+        uv pip install --pre vllm==0.10.1+gptoss \
+            --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
+            --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
+            --index-strategy unsafe-best-match || {
             echo "ERROR: Failed to install GPT-OSS vLLM build"
+            echo "This requires PyTorch nightly, Triton nightly, and other cutting-edge dependencies"
             exit 1
+        }
+        
+        # Install gpt-oss library for tool support
+        uv pip install gpt-oss || {
+            echo "WARNING: Failed to install gpt-oss library (needed for tool use)"
         }
         ;;
     *)
