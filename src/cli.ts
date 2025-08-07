@@ -330,6 +330,9 @@ try {
 					pod: podOverride,
 					interactive,
 					apiKey,
+				}).catch(() => {
+					// Error already handled in promptModel, just exit cleanly
+					process.exit(0);
 				});
 				break;
 			}

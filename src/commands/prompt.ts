@@ -74,7 +74,7 @@ const display = {
 	},
 
 	error: (text: string) => {
-		console.error(chalk.red(`[error] ${text}`));
+		console.error(chalk.red(`[error] ${text}\n`));
 	},
 };
 
@@ -335,6 +335,12 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 // ────────────────────────────────────────────────────────────────────────────────
 
 export async function promptModel(modelName: string, userMessages: string[] | undefined, opts: PromptOptions = {}) {
+	// Set up SIGINT handler to exit cleanly
+	process.on("SIGINT", () => {
+		console.log("\n" + chalk.gray("Interrupted."));
+		process.exit(0);
+	});
+
 	// Get pod and model configuration
 	const activePod = opts.pod ? { name: opts.pod, pod: loadConfig().pods[opts.pod] } : getActivePod();
 
@@ -375,18 +381,14 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 			output: process.stdout,
 		});
 
-		console.log(chalk.gray("Interactive mode. Type 'exit' to quit.\n"));
+		console.log(chalk.gray("Interactive mode. CTRL + C to quit.\n"));
 
 		const messages: any[] = [{ role: "system", content: systemPrompt }];
 
 		while (true) {
 			console.log(chalk.bgGreen.white("[user]"));
-			const input = await rl.question(``);
-
-			if (input.toLowerCase() === "exit") {
-				rl.close();
-				break;
-			}
+			const input = await rl.question(`${chalk.green("> ")}`);
+			console.log();
 
 			// Don't display user message again - it's already shown by readline
 			messages.push({ role: "user", content: input });
