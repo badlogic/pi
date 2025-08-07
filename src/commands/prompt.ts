@@ -58,9 +58,16 @@ const display = {
 		console.log();
 	},
 
-	user: () => {
-		console.log(chalk.bgGreen.white("[user]"));
-		console.log();
+	user: (text?: string) => {
+		if (text) {
+			console.log(chalk.bgGreen.white("[user]"));
+			console.log(text);
+			console.log();
+		} else {
+			// For interactive mode - just the label since text is already shown
+			console.log(chalk.bgGreen.white("[user]"));
+			console.log();
+		}
 	},
 
 	error: (text: string) => {
@@ -364,14 +371,14 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 		const messages: any[] = [{ role: "system", content: systemPrompt }];
 
 		while (true) {
-			const input = await rl.question(chalk.green("> "));
+			const input = await rl.question(chalk.bgGreen.white("[user] "));
 
 			if (input.toLowerCase() === "exit") {
 				rl.close();
 				break;
 			}
 
-			display.user();
+			// Don't display user message again - it's already shown by readline
 			messages.push({ role: "user", content: input });
 
 			try {
@@ -402,8 +409,8 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 				break;
 			}
 
-			// Display user label
-			display.user();
+			// Display user message for single-shot mode
+			display.user(userMessage);
 			messages.push({ role: "user", content: userMessage });
 
 			try {
