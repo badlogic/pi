@@ -2,6 +2,7 @@ import { tool } from "ai";
 import chalk from "chalk";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
+import { glob } from "glob";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
 import { resolve } from "path";
@@ -88,7 +89,7 @@ const display = {
 const toolsForResponses = [
 	{
 		type: "function" as const,
-		name: "read_file",
+		name: "read",
 		description: "Read contents of a file",
 		parameters: {
 			type: "object",
@@ -103,7 +104,7 @@ const toolsForResponses = [
 	},
 	{
 		type: "function" as const,
-		name: "list_directory",
+		name: "list",
 		description: "List contents of a directory",
 		parameters: {
 			type: "object",
@@ -117,8 +118,8 @@ const toolsForResponses = [
 	},
 	{
 		type: "function" as const,
-		name: "run_command",
-		description: "Execute a shell command",
+		name: "bash",
+		description: "Execute a command in Bash",
 		parameters: {
 			type: "object",
 			properties: {
@@ -128,6 +129,41 @@ const toolsForResponses = [
 				},
 			},
 			required: ["command"],
+		},
+	},
+	{
+		type: "function" as const,
+		name: "glob",
+		description: "Find files matching a glob pattern",
+		parameters: {
+			type: "object",
+			properties: {
+				pattern: {
+					type: "string",
+					description: "Glob pattern to match files (e.g., '**/*.ts', 'src/**/*.json')",
+				},
+				path: {
+					type: "string",
+					description: "Directory to search in (default: current directory)",
+				},
+			},
+			required: ["pattern"],
+		},
+	},
+	{
+		type: "function" as const,
+		name: "rg",
+		description: "Search using ripgrep.",
+		parameters: {
+			type: "object",
+			properties: {
+				args: {
+					type: "string",
+					description:
+						'Arguments to pass directly to ripgrep. Examples: "-l prompt" or "-i TODO" or "--type ts className" or "functionName src/". Never add quotes around the search pattern.',
+				},
+			},
+			required: ["args"],
 		},
 	},
 ];
@@ -146,7 +182,7 @@ async function executeTool(name: string, args: string): Promise<string> {
 	const parsed = JSON.parse(args);
 
 	switch (name) {
-		case "read_file": {
+		case "read": {
 			const path = parsed.path;
 			if (!path) return "Error: path parameter is required";
 			const file = resolve(path);
@@ -155,14 +191,15 @@ async function executeTool(name: string, args: string): Promise<string> {
 			return data;
 		}
 
-		case "list_directory": {
+		case "list": {
 			const path = parsed.path || ".";
 			const dir = resolve(path);
 			if (!existsSync(dir)) return `Directory not found: ${dir}`;
-			return readdirSync(dir).join("\n");
+			const entries = readdirSync(dir, { withFileTypes: true });
+			return entries.map((entry) => (entry.isDirectory() ? entry.name + "/" : entry.name)).join("\n");
 		}
 
-		case "run_command": {
+		case "bash": {
 			const command = parsed.command;
 			if (!command) return "Error: command parameter is required";
 			try {
@@ -170,6 +207,54 @@ async function executeTool(name: string, args: string): Promise<string> {
 				return output || "Command executed successfully";
 			} catch (e: any) {
 				throw new Error(`Command failed: ${e.message}`);
+			}
+		}
+
+		case "glob": {
+			const pattern = parsed.pattern;
+			if (!pattern) return "Error: pattern parameter is required";
+			const searchPath = parsed.path || process.cwd();
+
+			try {
+				const matches = await glob(pattern, {
+					cwd: searchPath,
+					dot: true,
+					nodir: false,
+					mark: true, // Add / to directories
+				});
+
+				if (matches.length === 0) {
+					return "No files found matching the pattern";
+				}
+
+				// Sort by modification time (most recent first) if possible
+				return matches.sort().join("\n");
+			} catch (e: any) {
+				return `Glob error: ${e.message}`;
+			}
+		}
+
+		case "rg": {
+			const args = parsed.args;
+			if (!args) return "Error: args parameter is required";
+
+			// Force ripgrep to never read from stdin by redirecting stdin from /dev/null
+			const cmd = `rg ${args} < /dev/null`;
+
+			try {
+				const output = execSync(cmd, {
+					encoding: "utf8",
+					maxBuffer: 10 * 1024 * 1024,
+					cwd: process.cwd(),
+					shell: "/bin/sh", // Need shell to handle the redirect
+				});
+				return output.trim() || "No matches found";
+			} catch (e: any) {
+				// ripgrep returns exit code 1 when no matches found
+				if (e.status === 1) {
+					return "No matches found";
+				}
+				return `ripgrep error: ${e.message}`;
 			}
 		}
 
@@ -187,7 +272,7 @@ async function callGptOssModel(client: OpenAI, model: string, messages: any[]): 
 	display.assistantLabel();
 
 	let conversationDone = false;
-	const maxRounds = 10;
+	const maxRounds = 10000;
 
 	for (let round = 0; round < maxRounds && !conversationDone; round++) {
 		const response = await client.responses.create({
@@ -284,7 +369,7 @@ async function callChatModel(client: OpenAI, model: string, messages: any[]): Pr
 	// Show assistant label at the start
 	display.assistantLabel();
 
-	const maxRounds = 5;
+	const maxRounds = 10000;
 	let assistantResponded = false;
 
 	for (let round = 0; round < maxRounds && !assistantResponded; round++) {
@@ -384,7 +469,19 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 	});
 
 	const isGptOss = modelConfig.model.toLowerCase().includes("gpt-oss");
-	const systemPrompt = `Current working directory: ${process.cwd()}`;
+	const systemPrompt = `
+You help the user understand an natigate the codebase in the current working directory.
+
+You can read files, list directories, and execute shell commands via the respective tools.
+
+Do not otuput file contents you read via the read_file tool directly, unless asked to.
+
+Do not output markdown tables as part of your responses.
+
+Keep your respones concise and relevant to the user's request.
+
+Current working directory: ${process.cwd()}
+`;
 
 	// Interactive mode
 	if (opts.interactive) {
