@@ -165,9 +165,9 @@
 						"--tensor-parallel-size",
 						"16",
 						"--tool-call-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--reasoning-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--enable-auto-tool-choice"
 					]
 				},
@@ -178,9 +178,9 @@
 						"--tensor-parallel-size",
 						"8",
 						"--tool-call-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--reasoning-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--enable-auto-tool-choice"
 					]
 				}
@@ -197,9 +197,9 @@
 						"--tensor-parallel-size",
 						"8",
 						"--tool-call-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--reasoning-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--enable-auto-tool-choice"
 					]
 				},
@@ -210,9 +210,9 @@
 						"--tensor-parallel-size",
 						"4",
 						"--tool-call-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--reasoning-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--enable-auto-tool-choice"
 					]
 				}
@@ -228,9 +228,9 @@
 						"--tensor-parallel-size",
 						"4",
 						"--tool-call-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--reasoning-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--enable-auto-tool-choice"
 					]
 				},
@@ -241,9 +241,9 @@
 						"--tensor-parallel-size",
 						"2",
 						"--tool-call-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--reasoning-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--enable-auto-tool-choice"
 					]
 				}
@@ -259,22 +259,30 @@
 						"--tensor-parallel-size",
 						"2",
 						"--tool-call-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--reasoning-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--enable-auto-tool-choice"
-					]
+					],
+					"env": {
+						"VLLM_ATTENTION_BACKEND": "XFORMERS"
+					},
+					"notes": "Uses XFORMERS backend to avoid FlashInfer issues"
 				},
 				{
 					"gpuCount": 1,
 					"gpuTypes": ["H200"],
 					"args": [
 						"--tool-call-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--reasoning-parser",
-						"glm4_moe ",
+						"glm4_moe",
 						"--enable-auto-tool-choice"
-					]
+					],
+					"env": {
+						"VLLM_ATTENTION_BACKEND": "XFORMERS"
+					},
+					"notes": "Uses XFORMERS backend to avoid FlashInfer issues"
 				}
 			]
 		},

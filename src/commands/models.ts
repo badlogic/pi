@@ -283,10 +283,10 @@ export const startModel = async (
 	const startCmd = `
 		source /root/venv/bin/activate
 		${envVars.map((v) => `export ${v}`).join("\n\t\t")}
-		
+
 		# Ensure log directory exists
 		mkdir -p ~/.vllm_logs
-		
+
 		# Just use nohup without colors for now - simpler and more reliable
 		nohup ${vllmCmd} > ~/.vllm_logs/${name}.log 2>&1 &
 		echo $!
@@ -362,7 +362,9 @@ export const startModel = async (
 			text.includes("torch.cuda.OutOfMemoryError") ||
 			text.includes("Address already in use") ||
 			(text.includes("RuntimeError") && !text.includes("Initializing")) ||
-			text.includes("AssertionError")
+			text.includes("AssertionError") ||
+			text.includes("NotImplementedError") ||
+			text.includes("Engine core initialization failed")
 		) {
 			serverFailed = true;
 			logProcess.kill();
