@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { main as agentMain } from "../agent/agent.js";
+import { main as agentMain } from "../agent/cli.js";
 import { getActivePod, loadConfig } from "../config.js";
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -8,7 +8,6 @@ import { getActivePod, loadConfig } from "../config.js";
 
 interface PromptOptions {
 	pod?: string;
-	interactive?: boolean;
 	apiKey?: string;
 	continue?: boolean;
 }
@@ -74,8 +73,8 @@ Current working directory: ${process.cwd()}`;
 		args.push("--continue");
 	}
 
-	// Add messages if not interactive
-	if (!opts.interactive && userMessages && userMessages.length > 0) {
+	// Add messages (if provided, it's single-shot mode; if not, it's interactive)
+	if (userMessages && userMessages.length > 0) {
 		args.push(...userMessages);
 	}
 

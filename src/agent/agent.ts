@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import OpenAI from "openai";
 import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
 import type { SessionManager } from "./session-manager.js";
@@ -62,10 +61,15 @@ export async function callModelResponsesApi(
 			{
 				model,
 				input: messages,
-				tools: toolsForResponses,
+				tools: toolsForResponses as any,
 				tool_choice: "auto",
+				parallel_tool_calls: true,
+				reasoning: {
+					effort: "medium", // Use auto reasoning effort
+					summary: "auto",
+				},
 				max_output_tokens: 2000, // TODO make configurable
-			} as any,
+			},
 			{ signal },
 		);
 
@@ -125,24 +129,29 @@ export async function callModelResponsesApi(
 					try {
 						await eventReceiver?.on({
 							type: "tool_call",
-							toolCallId: item.id || "",
+							toolCallId: item.call_id || "",
 							name: item.name,
 							args: item.arguments,
 						});
 						const result = await executeTool(item.name, item.arguments, signal);
-						await eventReceiver?.on({ type: "tool_result", toolCallId: item.id || "", result, isError: false });
+						await eventReceiver?.on({
+							type: "tool_result",
+							toolCallId: item.call_id || "",
+							result,
+							isError: false,
+						});
 
 						// Add tool result to messages
 						const toolResultMsg = {
 							type: "function_call_output",
-							call_id: item.id,
+							call_id: item.call_id,
 							output: result,
 						} as ResponseFunctionToolCallOutputItem;
 						messages.push(toolResultMsg);
 					} catch (e: any) {
 						await eventReceiver?.on({
 							type: "tool_result",
-							toolCallId: item.id || "",
+							toolCallId: item.call_id || "",
 							result: e.message,
 							isError: true,
 						});
@@ -299,7 +308,7 @@ export class Agent {
 		}
 	}
 
-	async chat(userMessage: string): Promise<void> {
+	async ask(userMessage: string): Promise<void> {
 		// Render user message through the event system
 		this.comboReceiver.on({ type: "user_message", text: userMessage });
 
@@ -462,218 +471,4 @@ export class Agent {
 			}
 		}
 	}
-}
-
-// Main function to use Agent as standalone CLI or programmatically
-export async function main(args: string[]): Promise<void> {
-	// Parse command line arguments
-	let baseURL = "https://api.openai.com/v1";
-	let apiKey = process.env.OPENAI_API_KEY || "";
-	let model = "gpt-4o-mini";
-	let continueSession = false;
-	let api: "completions" | "responses" = "completions";
-	let systemPrompt = "You are a helpful assistant.";
-	let jsonOutput = false;
-
-	for (let i = 0; i < args.length; i++) {
-		if (args[i] === "--base-url" && i + 1 < args.length) {
-			baseURL = args[++i];
-		} else if (args[i] === "--api-key" && i + 1 < args.length) {
-			apiKey = args[++i];
-		} else if (args[i] === "--model" && i + 1 < args.length) {
-			model = args[++i];
-		} else if (args[i] === "--continue") {
-			continueSession = true;
-		} else if (args[i] === "--api" && i + 1 < args.length) {
-			api = args[++i] as "completions" | "responses";
-		} else if (args[i] === "--system-prompt" && i + 1 < args.length) {
-			systemPrompt = args[++i];
-		} else if (args[i] === "--json") {
-			jsonOutput = true;
-		} else if (args[i] === "--help" || args[i] === "-h") {
-			console.log(`Usage: node agent.js [options] [message]
-
-Options:
-  --base-url <url>        API base URL (default: https://api.openai.com/v1)
-  --api-key <key>         API key (or set OPENAI_API_KEY env var)
-  --model <model>         Model name (default: gpt-4o-mini)
-  --api <type>            API type: "completions" or "responses" (default: completions)
-  --system-prompt <text>  System prompt (default: "You are a helpful assistant.")
-  --continue              Continue previous session
-  --json                  Output event stream as JSONL (single message mode only)
-  --help, -h              Show this help message
-
-Examples:
-  # Single message
-  node agent.js --api-key sk-... "What is 2+2?"
-
-  # Continue conversation
-  node agent.js --continue "What about 3+3?"
-
-  # Use local vLLM
-  node agent.js --base-url http://localhost:8000/v1 --model meta-llama/Llama-3.1-8B-Instruct "Hello"
-
-  # Interactive mode (no message = interactive)
-  node agent.js --api-key sk-...
-`);
-			return;
-		}
-	}
-
-	// Get message from remaining args (skip flags and their values)
-	const messages: string[] = [];
-	let skipNext = false;
-	for (let i = 0; i < args.length; i++) {
-		if (skipNext) {
-			skipNext = false;
-			continue;
-		}
-		if (args[i].startsWith("--")) {
-			// Check if this flag takes a value
-			const flag = args[i];
-			if (flag === "--continue" || flag === "--json" || flag === "--help" || flag === "-h") {
-				// These flags don't take values
-			} else {
-				// All other flags take a value, skip the next arg
-				skipNext = true;
-			}
-		} else {
-			// This is a message argument
-			messages.push(args[i]);
-		}
-	}
-	const message = messages.join(" ");
-
-	if (!apiKey) {
-		throw new Error("API key required (use --api-key or set OPENAI_API_KEY)");
-	}
-
-	// Import dependencies
-	const { ConsoleRenderer } = await import("./renderers/console-renderer.js");
-	const { SessionManager } = await import("./session-manager.js");
-	const { TuiRenderer } = await import("./renderers/tui-renderer.js");
-	const { JsonRenderer } = await import("./renderers/json-renderer.js");
-
-	// Create renderer based on mode
-	const isInteractive = !message;
-	let renderer: AgentEventReceiver;
-	if (isInteractive) {
-		renderer = new TuiRenderer();
-	} else if (jsonOutput) {
-		renderer = new JsonRenderer();
-	} else {
-		renderer = new ConsoleRenderer();
-	}
-
-	// Show configuration in interactive mode
-	if (isInteractive) {
-		console.log(`Using: ${baseURL} with model ${model}`);
-		if (!apiKey || apiKey === "dummy") {
-			console.log("Warning: No valid API key provided. Set OPENAI_API_KEY or use --api-key");
-		}
-	}
-
-	// Create session manager
-	const sessionManager = new SessionManager(continueSession);
-
-	// Create or restore agent
-	let agent: Agent;
-
-	if (continueSession) {
-		const sessionData = sessionManager.getSessionData();
-		if (sessionData) {
-			// Resume with existing config
-			console.log(`Resuming session with ${sessionData.events.length} events`);
-			agent = new Agent(
-				{
-					...sessionData.config,
-					apiKey, // Allow overriding API key
-				},
-				renderer,
-				sessionManager,
-			);
-			// Restore events
-			const agentEvents = sessionData.events.map((e) => e.event);
-			agent.setEvents(agentEvents);
-
-			// Replay events to renderer for visual continuity
-			if (isInteractive && renderer instanceof TuiRenderer) {
-				await renderer.init();
-				for (const sessionEvent of sessionData.events) {
-					const event = sessionEvent.event;
-					if (event.type === "assistant_start") {
-						renderer.renderAssistantLabel();
-					} else {
-						await renderer.on(event);
-					}
-				}
-			}
-		} else {
-			console.log("No previous session found, starting new session");
-			agent = new Agent(
-				{
-					apiKey,
-					baseURL,
-					model,
-					api,
-					systemPrompt: "You are a helpful assistant.",
-				},
-				renderer,
-				sessionManager,
-			);
-		}
-	} else {
-		agent = new Agent(
-			{
-				apiKey,
-				baseURL,
-				model,
-				api,
-				systemPrompt,
-			},
-			renderer,
-			sessionManager,
-		);
-	}
-
-	// Run in appropriate mode
-	if (isInteractive) {
-		// Interactive mode with TUI
-		const tui = renderer as InstanceType<typeof TuiRenderer>;
-		await tui.init();
-
-		tui.setInterruptCallback(() => {
-			agent.interrupt();
-		});
-
-		while (true) {
-			const userInput = await tui.getUserInput();
-			if (userInput.toLowerCase() === "exit" || userInput.toLowerCase() === "quit") {
-				tui.stop();
-				break;
-			}
-
-			try {
-				await agent.chat(userInput);
-			} catch (e: any) {
-				await renderer.on({ type: "error", message: e.message });
-			}
-		}
-	} else {
-		// Single message mode
-		try {
-			await agent.chat(message);
-		} catch (e: any) {
-			await renderer.on({ type: "error", message: e.message });
-			throw e;
-		}
-	}
-}
-
-// Run as CLI if invoked directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-	main(process.argv.slice(2)).catch((err) => {
-		console.error(err);
-		process.exit(1);
-	});
 }

@@ -39,7 +39,9 @@ Model Management:
   pi stop [<name>]                                  Stop model (or all if no name)
   pi list                                           List running models
   pi logs <name>                                    Stream model logs
-  pi agent <name> "<message>" [--thinking]          Chat with model using agent & tools
+  pi agent <name> ["<message>"...]                  Chat with model using agent & tools
+  pi agent <name>                                   Interactive chat mode
+  pi agent <name> --continue                        Continue previous session
 
   All model commands support --pod <name> to override the active pod.
 
@@ -324,15 +326,14 @@ try {
 				break;
 			}
 			case "agent": {
-				// pi agent <name> ["<message>"] [-i|--interactive]
+				// pi agent <name> [messages...] [--continue]
 				const name = args[1];
 				if (!name) {
-					console.error('Usage: pi agent <name> ["<message>"] [-i|--interactive]');
+					console.error("Usage: pi agent <name> [messages...] [--continue]");
 					process.exit(1);
 				}
 
-				const interactive = args.includes("-i") || args.includes("--interactive");
-				const continueSession = args.includes("-c") || args.includes("--continue");
+				const continueSession = args.includes("--continue");
 				const apiKey = process.env.PI_API_KEY;
 
 				// Collect all messages (skip model name and flags)
@@ -343,14 +344,9 @@ try {
 					}
 				}
 
-				if (!interactive && messages.length === 0) {
-					console.error('Usage: pi agent <name> "<message>"... or pi agent <name> -i [-c]');
-					process.exit(1);
-				}
-
+				// If no messages provided, it's interactive mode
 				await promptModel(name, messages.length > 0 ? messages : undefined, {
 					pod: podOverride,
-					interactive,
 					continue: continueSession,
 					apiKey,
 				}).catch(() => {

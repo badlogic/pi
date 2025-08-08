@@ -6,10 +6,10 @@
 	"main": "dist/index.js",
 	"bin": {
 		"pi": "dist/cli.js",
-		"pi-agent": "dist/agent/agent.js"
+		"pi-agent": "dist/agent/cli.js"
 	},
 	"scripts": {
-		"build": "tsc && cp src/models.json dist/ && chmod +x dist/agent/agent.js",
+		"build": "tsc && cp src/models.json dist/ && chmod +x dist/agent/cli.js",
 		"dev": "tsc --watch --preserveWatchOutput",
 		"clean": "rm -rf dist",
 		"prepublishOnly": "npm run clean && npm run build",
