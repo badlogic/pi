@@ -1,6 +1,6 @@
-# GPU Pod Manager
+# pi
 
-Quickly deploy LLMs on GPU pods from [Prime Intellect](https://www.primeintellect.ai/), [Vast.ai](https://vast.ai/), [DataCrunch](datacrunch.io), AWS, etc., for local coding agents and AI assistants.
+Deploy and manage LLMs on GPU pods with automatic vLLM configuration for agentic workloads.
 
 ## Installation
 
@@ -8,526 +8,397 @@ Quickly deploy LLMs on GPU pods from [Prime Intellect](https://www.primeintellec
 npm install -g @mariozechner/pi
 ```
 
-Or run directly with npx:
-```bash
-npx @mariozechner/pi
-```
+## What is pi?
 
-## What This Is
-
-A simple CLI tool that automatically sets up and manages vLLM deployments on GPU pods. Start from a clean Ubuntu pod and have multiple models running in minutes. A GPU pod is defined as an Ubuntu machine with root access, one or more GPUs, and Cuda drivers installed. It is aimed at individuals who are limited by local hardware and want to experiment with large open weight LLMs for their coding assistent workflows.
-
-**Key Features:**
-- **Zero to LLM in minutes** - Automatically installs vLLM and all dependencies on clean pods
-- **Multi-model management** - Run multiple models concurrently on a single pod
-- **Smart GPU allocation** - Round robin assigns models to available GPUs on multi-GPU pods
-- **Tensor parallelism** - Run large models across multiple GPUs with `--all-gpus`
-- **OpenAI-compatible API** - Drop-in replacement for OpenAI API clients with automatic tool/function calling support
-- **No complex setup** - Just SSH access, no Kubernetes or Docker required
-- **Privacy first** - vLLM telemetry disabled by default
-
-**Limitations:**
-- OpenAI endpoints exposed to the public internet (yolo)
-- Requires manual pod creation via Prime Intellect, Vast.ai, AWS, etc.
-- Assumes Ubuntu 22 image when creating pods
-
-## What this is not
-- A provisioning manager for pods. You need to provision the pods on the respective provider themselves.
-- Super optimized LLM deployment infrastructure for absolute best performance. This is for individuals who want to quickly spin up large open weights models for local LLM loads.
-
-## Requirements
-
-- **Node.js 14+** - To run the CLI tool on your machine
-- **HuggingFace Token** - Required for downloading models (get one at https://huggingface.co/settings/tokens)
-- **Prime Intellect/DataCrunch/Vast.ai Account**
-- **GPU Pod** - At least one running pod with:
-  - Ubuntu 22+ image (selected when creating pod)
-  - SSH access enabled
-  - Clean state (no manual vLLM installation needed)
-  - **Note**: B200 GPUs require PyTorch nightly with CUDA 12.8+ (automatically installed if detected). However, vLLM may need to be built from source for full compatibility.
+`pi` simplifies running large language models on remote GPU pods. It automatically:
+- Sets up vLLM on fresh Ubuntu pods
+- Configures tool calling for agentic models (Qwen, GPT-OSS, GLM, etc.)
+- Manages multiple models on the same pod with "smart" GPU allocation
+- Provides OpenAI-compatible API endpoints for each model
+- Includes an interactive chat with file system tools for testing
 
 ## Quick Start
 
 ```bash
-# 1. Get a GPU pod from Prime Intellect
-#    Visit https://app.primeintellect.ai or https://vast.ai/ or https://datacrunch.io and create a pod (use Ubuntu 22+ image)
-#    Providers usually give you an SSH command with which to log into the machine. Copy that command.
-#    IMPORTANT: Note where your provider stores persistent data (e.g., /workspace, /data, etc.)
+# Set required environment variables
+export HF_TOKEN=your_huggingface_token      # Get from https://huggingface.co/settings/tokens
+export VLLM_API_KEY=your_api_key           # Any string you want for API authentication
 
-# 2. On your local machine, run the following to setup the remote pod. The Hugging Face token
-#    is required for model download. The --models-path is REQUIRED and should point to persistent storage.
-export HF_TOKEN=your_huggingface_token
-pi setup my-pod-name "ssh root@135.181.71.41 -p 22" --models-path /workspace
+# Setup a DataCrunch pod with NFS storage (models path auto-extracted)
+pi pods setup dc1 "ssh root@1.2.3.4" \
+  --mount "sudo mount -t nfs -o nconnect=16 nfs.fin-02.datacrunch.io:/your-pseudo /mnt/hf-models"
 
-# 3. Start a model (automatically manages GPU assignment)
-pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 20%
+# Start a model (automatic configuration for known models)
+pi start Qwen/Qwen2.5-Coder-32B-Instruct --name qwen
 
-# 4. Test the model with a prompt
-pi prompt phi3 "What is 2+2?"
-# Response: The answer is 4.
+# Test with interactive chat (includes file tools)
+pi prompt qwen -i
 
-# 5. Start another model (automatically uses next available GPU on multi-GPU pods)
-pi start Qwen/Qwen2.5-7B-Instruct --name qwen --memory 30%
-
-# 6. Check running models
-pi list
-
-# 7. Use with your coding agent
-export OPENAI_BASE_URL='http://135.181.71.41:8001/v1'  # For first model
-export OPENAI_API_KEY='dummy'
+# Or use with any OpenAI-compatible client
+export OPENAI_BASE_URL='http://1.2.3.4:8001/v1'
+export OPENAI_API_KEY=$VLLM_API_KEY
 ```
 
-## How It Works
+## Prerequisites
 
-1. **Automatic Setup**: When you run `pi setup`, it:
-   - Connects to your clean Ubuntu pod
-   - Installs Python, CUDA drivers, and vLLM
-   - Configures HuggingFace tokens
-   - Sets up the model manager
+- Node.js 18+
+- HuggingFace token (for model downloads)
+- GPU pod with:
+  - Ubuntu 22.04 or 24.04
+  - SSH root access
+  - NVIDIA drivers installed
+  - Persistent storage for models
 
-2. **Model Management**: Each `pi start` command:
-   - Automatically finds an available GPU (on multi-GPU systems)
-   - Allocates the specified memory fraction
-   - Starts a separate vLLM instance on a unique port accessible via the OpenAI API protocol
-   - Manages logs and process lifecycle
+## Supported Providers
 
-3. **Multi-GPU Support**: On pods with multiple GPUs:
-   - Single models automatically distribute across available GPUs
-   - Large models can use tensor parallelism with `--all-gpus`
-   - View GPU assignments with `pi list`
+### Primary Support
 
+**DataCrunch** - Best for shared model storage
+- NFS volumes sharable across multiple pods in same region
+- Models download once, use everywhere
+- Ideal for teams or multiple experiments
+
+**RunPod** - Good persistent storage
+- Network volumes persist independently
+- Cannot share between running pods simultaneously
+- Good for single-pod workflows
+
+### Also Works With
+- Vast.ai (volumes locked to specific machine)
+- Prime Intellect (no persistent storage)
+- AWS EC2 (with EFS setup)
+- Any Ubuntu machine with GPUs and SSH
 
 ## Commands
 
 ### Pod Management
 
-The tool supports managing multiple GPU pods from a single machine. Each pod is identified by a name you choose (e.g., "prod", "dev", "h200"). While all your pods continue running independently, the tool operates on one "active" pod at a time - all model commands (start, stop, list, etc.) are directed to this active pod. You can easily switch which pod is active to manage models on different machines.
-
 ```bash
-pi setup <pod-name> "<ssh_command>" --models-path <path> [--mount <command>]  # Configure and activate a pod
-pi pods                                                                       # List all pods (active pod marked)
-pi pod <pod-name>                                                            # Switch active pod
-pi pod remove <pod-name>                                                     # Remove pod from config
-pi shell                                                                     # SSH into active pod
+pi pods setup <name> "<ssh>" [options]        # Setup new pod
+  --mount "<mount_command>"                   # Run mount command during setup
+  --models-path <path>                        # Override extracted path (optional)
+  --vllm release|nightly|gpt-oss              # vLLM version (default: release)
+
+pi pods                                       # List all configured pods
+pi pods active <name>                         # Switch active pod
+pi pods remove <name>                         # Remove pod from local config
+pi shell [<name>]                             # SSH into pod
+pi ssh [<name>] "<command>"                   # Run command on pod
 ```
 
-#### Why --models-path is Required
+**Note**: When using `--mount`, the models path is automatically extracted from the mount command's target directory. You only need `--models-path` if not using `--mount` or to override the extracted path.
 
-The `--models-path` parameter is **REQUIRED** to ensure your downloaded models persist across pod restarts and can be shared between pods. Here's why this matters:
+#### vLLM Version Options
 
-1. **Avoid Re-downloading**: Large models (70B+) can take 30+ minutes to download. With persistent storage, download once and reuse.
-2. **Cost Efficiency**: No wasted GPU time re-downloading models every time you start a pod.
-3. **Pod Flexibility**: Switch between different GPU types or providers while keeping your model library.
-4. **Shared Model Library**: With network volumes, multiple pods can access the same models simultaneously.
-5. **Disaster Recovery**: If a pod crashes or gets terminated, your models are safe.
-
-Without persistent storage, models would be stored in the pod's ephemeral storage and lost when the pod stops, requiring re-download every time.
-
-**Example scenario**: Running Llama-3.1-70B (140GB download)
-- ❌ Without persistent storage: 30 min download every pod restart = $5-10 wasted GPU time per restart
-- ✅ With persistent storage: Download once, instant starts forever = Save hours and dollars
-
-#### Model Storage Paths by Provider
-
-The `--models-path` should point to persistent storage that survives pod restarts:
-
-| Provider | Recommended Path | Type | Notes |
-|----------|-----------------|------|-------|
-| **RunPod** | `/workspace` | Pod storage | Persists for pod lifetime |
-| **RunPod** | `/runpod-volume` | Network volume | Shared across pods (if configured) |
-| **Vast.ai** | `/workspace` | Instance storage | Check your instance details |
-| **DataCrunch** | `/mnt/sfs` | NFS mount | Requires manual mount (see below) |
-| **Lambda Labs** | `/persistent` | Persistent storage | Check instance config |
-| **AWS** | `/mnt/efs` | EFS mount | Configure EFS first |
-| **Custom** | `/your/path` | Your mount | Any persistent mount point |
-
-**Example setups:**
-```bash
-# RunPod with network volume
-pi setup runpod "root@123.45.67.89 -p 22" --models-path /runpod-volume
-
-# Vast.ai with workspace
-pi setup vast "root@vast.ai -p 22" --models-path /workspace
-
-# DataCrunch with NFS mount (see DataCrunch section below)
-pi setup dc "ubuntu@dc.server.com" --models-path /mnt/sfs
-```
-
-#### DataCrunch Shared Filesystem Setup
-
-DataCrunch uses NFS for shared storage. The easiest way is to use the `--mount` flag during setup:
-
-**Option 1: Automatic mount with --mount flag (Recommended)**
-
-1. **Create a Shared Filesystem (SFS) in DataCrunch dashboard**
-2. **Share it with your instance**
-3. **Copy the mount command from DataCrunch dashboard**
-4. **Run pi setup with --mount:**
-
-```bash
-# Copy the mount command from DataCrunch dashboard and use it with --mount
-pi setup dc "ubuntu@your-instance.datacrunch.io" --models-path /mnt/sfs \
-  --mount "sudo mount -t nfs -o nconnect=16 nfs.fin-01.datacrunch.io:/your-pseudo /mnt/sfs"
-```
-
-The setup will automatically:
-- Create the mount point directory
-- Execute the mount command
-- Add to /etc/fstab for persistence
-- Verify the mount succeeded
-
-**Option 2: Manual mount before setup**
-
-```bash
-# SSH into your DataCrunch instance first
-ssh ubuntu@your-instance.datacrunch.io
-
-# Create mount point
-sudo mkdir -p /mnt/sfs
-
-# Mount the filesystem (replace with your values from DataCrunch dashboard)
-# <DC> = datacenter (e.g., fin-01)
-# <PSEUDO> = pseudopath from your SFS dashboard
-sudo mount -t nfs -o nconnect=16 nfs.<DC>.datacrunch.io:<PSEUDO> /mnt/sfs
-
-# Add to fstab for persistence across reboots
-echo 'nfs.<DC>.datacrunch.io:<PSEUDO> /mnt/sfs nfs defaults,nconnect=16 0 0' | sudo tee -a /etc/fstab
-
-# Verify mount
-df -h /mnt/sfs
-
-# Exit back to your local machine
-exit
-
-# Now run pi setup with the mounted path
-pi setup dc "ubuntu@your-instance.datacrunch.io" --models-path /mnt/sfs
-```
-
-**Benefits of DataCrunch SFS:**
-- Shared across all your DataCrunch instances in the same datacenter
-- Survives instance deletion
-- Can be used to share models between multiple GPU instances
-- Pay only for storage, not compute time while models download
-
-#### Working with Multiple Pods
-
-You can manage models on any pod without switching the active pod by using the `--pod` parameter:
-
-```bash
-# List models on a specific pod
-pi list --pod prod
-
-# Start a model on a specific pod
-pi start Qwen/Qwen2.5-7B-Instruct --name qwen --pod dev
-
-# Stop a model on a specific pod
-pi stop qwen --pod dev
-
-# View logs from a specific pod
-pi logs qwen --pod dev
-
-# Test a model on a specific pod
-pi prompt qwen "Hello!" --pod dev
-
-# SSH into a specific pod
-pi shell --pod prod
-pi ssh --pod prod "nvidia-smi"
-```
-
-This allows you to manage multiple environments (dev, staging, production) from a single machine without constantly switching between them.
+- `release` (default): Stable vLLM release, recommended for most users
+- `nightly`: Latest vLLM features, needed for newest models like GLM-4.5
+- `gpt-oss`: Special build for OpenAI's GPT-OSS models only
 
 ### Model Management
 
-Each model runs as a separate vLLM instance with its own port and GPU allocation. The tool automatically manages GPU assignment on multi-GPU systems and ensures models don't conflict. Models are accessed by their short names (either auto-generated or specified with --name).
-
 ```bash
-pi list                              # List running models on active pod
-pi search <query>                    # Search HuggingFace models
-pi start <model> [options]           # Start a model with options
-  --name <name>                      # Short alias (default: auto-generated)
-  --context <size>                   # Context window: 4k, 8k, 16k, 32k (default: model default)
-  --memory <percent>                 # GPU memory: 30%, 50%, 90% (default: 90%)
-  --all-gpus                         # Use tensor parallelism across all GPUs
-  --pod <pod-name>                   # Run on specific pod (default: active pod)
-  --vllm-args                        # Pass all remaining args directly to vLLM
-pi stop [name]                       # Stop a model (or all if no name)
-pi logs <name>                       # View logs with tail -f
-pi prompt <name> "message"           # Quick test prompt
-pi downloads [--live]                # Check model download progress (--live for continuous monitoring)
+pi start <model> --name <name> [options]  # Start a model
+  --memory <percent>      # GPU memory: 30%, 50%, 90% (default: 90%)
+  --context <size>        # Context window: 4k, 8k, 16k, 32k, 64k, 128k
+  --pod <name>            # Target specific pod (overrides active)
+  --vllm <args...>        # Pass custom args directly to vLLM
+
+pi stop [<name>]          # Stop model (or all if no name given)
+pi list                   # List running models with status
+pi logs <name>            # Stream model logs (tail -f)
 ```
 
-All model management commands support the `--pod` parameter to target a specific pod without switching the active pod.
-
-## Examples
-
-### Running GPT-OSS Models
-
-OpenAI's GPT-OSS models are open-weight models optimized with MXFP4 quantization:
+### Testing & Interaction
 
 ```bash
-# GPT-OSS 20B - Fits on 16GB+ VRAM GPUs
-pi start openai/gpt-oss-20b --name gpt-oss-20b
-
-# GPT-OSS 120B - Needs 60GB+ VRAM (single H100 or multi-GPU)
-pi start openai/gpt-oss-120b --name gpt-oss-120b --all-gpus
-
-# With custom context and memory settings
-pi start openai/gpt-oss-20b --name gpt-oss --context 32k --memory 50%
+pi prompt <name> "<message>"              # Single prompt
+pi prompt <name> "<msg1>" "<msg2>"        # Multiple prompts in sequence
+pi prompt <name> -i                       # Interactive chat mode
+pi prompt <name> -i -c                    # Continue previous session
 ```
 
-Both models support:
-- Chat completions API
-- Responses API (OpenAI's new format)
-- Tool calling (function calling)
-- Browsing capabilities
+Interactive mode includes tools for file operations (read, list, bash, glob, rg) to test agentic capabilities.
 
-### Search for models
+## Predefined Model Configurations
+
+`pi` includes predefined configurations for popular agentic models, so you do not have to specify `--vllm` arguments manually. `pi` will also check if the model you selected can actually run on your pod with respect to the number of GPUs and available VRAM. Run `pi start` without additional arguments to see a list of predefined models that can run on the active pod.
+
+### Qwen Models
 ```bash
-pi search codellama
-pi search deepseek
-pi search qwen
+# Qwen2.5-Coder-32B - Excellent coding model, fits on single H100/H200
+pi start Qwen/Qwen2.5-Coder-32B-Instruct --name qwen
+
+# Qwen3-Coder-30B - Advanced reasoning with tool use
+pi start Qwen/Qwen3-Coder-30B-A3B-Instruct --name qwen3
+
+# Qwen3-Coder-480B - State-of-the-art on 8xH200 (data-parallel mode)
+pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --name qwen-480b
 ```
 
-**Note**: vLLM does not support formats like GGUF. Read the [docs](https://docs.vllm.ai/en/latest/)
-
-### A100 80GB scenarios
+### GPT-OSS Models
 ```bash
-# Small model, high concurrency (~30-50 concurrent requests)
-pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 30%
+# Requires special vLLM build during setup
+pi pods setup gpt-pod "ssh root@1.2.3.4" --models-path /workspace --vllm gpt-oss
 
-# Medium model, balanced (~10-20 concurrent requests)
-pi start meta-llama/Llama-3.1-8B-Instruct --name llama8b --memory 50%
+# GPT-OSS-20B - Fits on 16GB+ VRAM
+pi start openai/gpt-oss-20b --name gpt20
 
-# Large model, limited concurrency (~5-10 concurrent requests)
-pi start meta-llama/Llama-3.1-70B-Instruct --name llama70b --memory 90%
-
-# Run multiple small models
-pi start Qwen/Qwen2.5-Coder-1.5B --name coder1 --memory 15%
-pi start microsoft/Phi-3-mini-128k-instruct --name phi3 --memory 15%
+# GPT-OSS-120B - Needs 60GB+ VRAM
+pi start openai/gpt-oss-120b --name gpt120
 ```
 
-## Understanding Context and Memory
-
-### Context Window vs Output Tokens
-Models are loaded with their default context length. You can use the `context` parameter to specify a lower or higher context length. The `context` parameter sets the **total** token budget for input + output combined:
-- Starting a model with `context=8k` means 8,192 tokens total
-- If your prompt uses 6,000 tokens, you have 2,192 tokens left for the response
-- Each OpenAI API request to the model can specify `max_output_tokens` to control output length within this budget
-
-Example:
+### GLM Models
 ```bash
-# Start model with 32k total context
-pi start meta-llama/Llama-3.1-8B --name llama --context 32k --memory 50%
+# GLM-4.5 - Requires 8-16 GPUs, includes thinking mode
+pi start zai-org/GLM-4.5 --name glm
 
-# When calling the API, you control output length per request:
-# - Send 20k token prompt
-# - Request max_tokens=4000
-# - Total = 24k (fits within 32k context)
+# GLM-4.5-Air - Smaller version, 1-2 GPUs
+pi start zai-org/GLM-4.5-Air --name glm-air
 ```
 
-### GPU Memory and Concurrency
-vLLM pre-allocates GPU memory controlled by `gpu_fraction`. This matters for coding agents that spawn sub-agents, as each connection needs memory.
+### Custom Models with --vllm
 
-Example: On an A100 80GB with a 7B model (FP16, ~14GB weights):
-- `gpu_fraction=0.3` (24GB): ~10GB for KV cache → ~30-50 concurrent requests
-- `gpu_fraction=0.5` (40GB): ~26GB for KV cache → ~50-80 concurrent requests
-- `gpu_fraction=0.9` (72GB): ~58GB for KV cache → ~100+ concurrent requests
+For models not in the predefined list, use `--vllm` to pass arguments directly to vLLM:
 
-Models load in their native precision from HuggingFace (usually FP16/BF16). Check the model card's "Files and versions" tab - look for file sizes: 7B models are ~14GB, 13B are ~26GB, 70B are ~140GB. Quantized models (AWQ, GPTQ) in the name use less memory but may have quality trade-offs.
+```bash
+# DeepSeek with custom settings
+pi start deepseek-ai/DeepSeek-V3 --name deepseek --vllm \
+  --tensor-parallel-size 4 --trust-remote-code
+
+# Mistral with pipeline parallelism
+pi start mistralai/Mixtral-8x22B-Instruct-v0.1 --name mixtral --vllm \
+  --tensor-parallel-size 8 --pipeline-parallel-size 2
+
+# Any model with specific tool parser
+pi start some/model --name mymodel --vllm \
+  --tool-call-parser hermes --enable-auto-tool-choice
+```
+
+## DataCrunch Setup
+
+DataCrunch offers the best experience with shared NFS storage across pods:
+
+### 1. Create Shared Filesystem (SFS)
+- Go to DataCrunch dashboard → Storage → Create SFS
+- Choose size and datacenter
+- Note the mount command (e.g., `sudo mount -t nfs -o nconnect=16 nfs.fin-02.datacrunch.io:/hf-models-fin02-8ac1bab7 /mnt/hf-models-fin02`)
+
+### 2. Create GPU Instance
+- Create instance in same datacenter as SFS
+- Share the SFS with the instance
+- Get SSH command from dashboard
+
+### 3. Setup with pi
+```bash
+# Get mount command from DataCrunch dashboard
+pi pods setup dc1 "ssh root@instance.datacrunch.io" \
+  --mount "sudo mount -t nfs -o nconnect=16 nfs.fin-02.datacrunch.io:/your-pseudo /mnt/hf-models"
+
+# Models automatically stored in /mnt/hf-models (extracted from mount command)
+```
+
+### 4. Benefits
+- Models persist across instance restarts
+- Share models between multiple instances in same datacenter
+- Download once, use everywhere
+- Pay only for storage, not compute time during downloads
+
+## RunPod Setup
+
+RunPod offers good persistent storage with network volumes:
+
+### 1. Create Network Volume (optional)
+- Go to RunPod dashboard → Storage → Create Network Volume
+- Choose size and region
+
+### 2. Create GPU Pod
+- Select "Network Volume" during pod creation (if using)
+- Attach your volume to `/runpod-volume`
+- Get SSH command from pod details
+
+### 3. Setup with pi
+```bash
+# With network volume
+pi pods setup runpod "ssh root@pod.runpod.io" --models-path /runpod-volume
+
+# Or use workspace (persists with pod but not shareable)
+pi pods setup runpod "ssh root@pod.runpod.io" --models-path /workspace
+```
+
 
 ## Multi-GPU Support
 
-For pods with multiple GPUs, the tool automatically manages GPU assignment:
-
-### Automatic GPU assignment for multiple models
+### Automatic GPU Assignment
+When running multiple models, pi automatically assigns them to different GPUs:
 ```bash
-# Each model automatically uses the next available GPU
-pi start microsoft/Phi-3-mini-128k-instruct --memory 20%  # Auto-assigns to GPU 0
-pi start Qwen/Qwen2.5-7B-Instruct --memory 20%         # Auto-assigns to GPU 1
-pi start meta-llama/Llama-3.1-8B --memory 20%          # Auto-assigns to GPU 2
-
-# Check which GPU each model is using
-pi list
+pi start model1 --name m1  # Auto-assigns to GPU 0
+pi start model2 --name m2  # Auto-assigns to GPU 1
+pi start model3 --name m3  # Auto-assigns to GPU 2
 ```
 
-## Qwen on a single H200
+### Tensor Parallelism for Large Models
+For models that don't fit on a single GPU:
 ```bash
-pi start Qwen/Qwen3-Coder-30B-A3B-Instruct qwen3-30b
+# Use all available GPUs
+pi start meta-llama/Llama-3.1-70B-Instruct --name llama70b --vllm \
+  --tensor-parallel-size 4
+
+# Specific GPU count
+pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --name qwen480 --vllm \
+  --data-parallel-size 8 --enable-expert-parallel
 ```
 
-### Run large models across all GPUs
-```bash
-# Use --all-gpus for tensor parallelism across all available GPUs
-pi start meta-llama/Llama-3.1-70B-Instruct --all-gpus
-pi start Qwen/Qwen2.5-72B-Instruct --all-gpus --context 64k
+## API Integration
+
+All models expose OpenAI-compatible endpoints:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://your-pod-ip:8001/v1",
+    api_key="your-vllm-api-key"
+)
+
+# Chat completion with tool calling
+response = client.chat.completions.create(
+    model="Qwen/Qwen2.5-Coder-32B-Instruct",
+    messages=[
+        {"role": "user", "content": "Write a Python function to calculate fibonacci"}
+    ],
+    tools=[{
+        "type": "function",
+        "function": {
+            "name": "execute_code",
+            "description": "Execute Python code",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string"}
+                },
+                "required": ["code"]
+            }
+        }
+    }],
+    tool_choice="auto"
+)
 ```
 
-### Advanced: Custom vLLM arguments
-```bash
-# Pass custom arguments directly to vLLM with --vllm-args
-# Everything after --vllm-args is passed to vLLM unchanged
+## Tool Calling Support
 
-# Qwen3-Coder 480B on 8xH200 with expert parallelism
-pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --name qwen-coder --vllm-args \
-  --data-parallel-size 8 --enable-expert-parallel \
-  --tool-call-parser qwen3_coder --enable-auto-tool-choice --gpu-memory-utilization 0.95 --max-model-len 200000
+`pi` automatically configures appropriate tool calling parsers for known models:
 
-# DeepSeek with custom quantization
-pi start deepseek-ai/DeepSeek-Coder-V2-Instruct --name deepseek --vllm-args \
-  --tensor-parallel-size 4 --quantization fp8 --trust-remote-code
-
-# Mixtral with pipeline parallelism
-pi start mistralai/Mixtral-8x22B-Instruct-v0.1 --name mixtral --vllm-args \
-  --tensor-parallel-size 8 --pipeline-parallel-size 2
-```
-
-**Note on Special Models**: Some models require specific vLLM arguments to run properly:
-- **Qwen3-Coder 480B**: Requires `--enable-expert-parallel` for MoE support
-- **Kimi K2**: May require custom arguments - check the model's documentation
-- **DeepSeek V3**: Often needs `--trust-remote-code` for custom architectures
-- When in doubt, consult the model's HuggingFace page or documentation for recommended vLLM settings
-
-### Check GPU usage
-```bash
-pi ssh "nvidia-smi"
-```
-
-## Architecture Notes
-
-- **Multi-Pod Support**: The tool stores multiple pod configurations in `~/.pi_config` with one active pod at a time.
-- **Port Allocation**: Each model runs on a separate port (8001, 8002, etc.) allowing multiple models on one GPU.
-- **Memory Management**: vLLM uses PagedAttention for efficient memory use with less than 4% waste.
-- **Model Caching**: Models are downloaded once and cached on the pod.
-- **Tool Parser Auto-Detection**: The tool automatically selects the appropriate tool parser based on the model:
-  - Qwen models: `hermes` (Qwen3-Coder: `qwen3_coder` if available)
-  - Mistral models: `mistral` with optimized chat template
-  - Llama models: `llama3_json` or `llama4_pythonic` based on version
-  - InternLM models: `internlm`
-  - Phi models: Tool calling disabled by default (no compatible tokens)
-  - Override with `--vllm-args --tool-call-parser <parser> --enable-auto-tool-choice`
-
-
-## Tool Calling (Function Calling)
-
-Tool calling allows LLMs to request the use of external functions/APIs, but it's a complex feature with many caveats:
-
-### The Reality of Tool Calling
-
-1. **Model Compatibility**: Not all models support tool calling, even if they claim to. Many models lack the special tokens or training needed for reliable tool parsing.
-
-2. **Parser Mismatches**: Different models use different tool calling formats:
-   - Hermes format (XML-like)
-   - Mistral format (specific JSON structure)
-   - Llama format (JSON-based or pythonic)
-   - Custom formats for each model family
-
-3. **Common Issues**:
-   - "Could not locate tool call start/end tokens" - Model doesn't have required special tokens
-   - Malformed JSON/XML output - Model wasn't trained for the parser format
-   - Tool calls when you don't want them - Model overeager to use tools
-   - No tool calls when you need them - Model doesn't understand when to use tools
-
-### How We Handle It
-
-The tool automatically detects the model and tries to use an appropriate parser:
 - **Qwen models**: `hermes` parser (Qwen3-Coder uses `qwen3_coder`)
-- **Mistral models**: `mistral` parser with custom template
-- **Llama models**: `llama3_json` or `llama4_pythonic` based on version
-- **Phi models**: Tool calling disabled (no compatible tokens)
+- **GLM models**: `glm4_moe` parser with reasoning support
+- **GPT-OSS models**: Uses `/v1/responses` endpoint, as tool calling (functino calling in OpenAI parlance) is currently a [WIP with the `v1/chat/completions` endpoint](https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html#tool-use).
+- **Custom models**: Specify with `--vllm --tool-call-parser <parser> --enable-auto-tool-choice`
 
-### Your Options
-
-1. **Let auto-detection handle it** (default):
-   ```bash
-   pi start meta-llama/Llama-3.1-8B-Instruct --name llama
-   ```
-
-2. **Force a specific parser** (if you know better):
-   ```bash
-   pi start model/name --name mymodel --vllm-args \
-     --tool-call-parser mistral --enable-auto-tool-choice
-   ```
-
-3. **Disable tool calling entirely** (most reliable):
-   ```bash
-   pi start model/name --name mymodel --vllm-args \
-     --disable-tool-call-parser
-   ```
-
-4. **Handle tools in your application** (recommended for production):
-   - Send regular prompts asking the model to output JSON
-   - Parse the response in your code
-   - More control, more reliable
-
-### Best Practices
-
-- **Test first**: Try a simple tool call to see if it works with your model
-- **Have a fallback**: Be prepared for tool calling to fail
-- **Consider alternatives**: Sometimes a well-crafted prompt works better than tool calling
-- **Read the docs**: Check the model card for tool calling examples
-- **Monitor logs**: Check `~/.vllm_logs/` for parser errors
-
-Remember: Tool calling is still an evolving feature in the LLM ecosystem. What works today might break tomorrow with a model update.
-
-## Monitoring Downloads
-
-Use `pi downloads` to check the progress of model downloads in the HuggingFace cache:
-
+To disable tool calling:
 ```bash
-pi downloads                         # Check downloads on active pod
-pi downloads --live                  # Live monitoring (updates every 2 seconds)
-pi downloads --pod 8h200            # Check downloads on specific pod
-pi downloads --live --pod 8h200     # Live monitoring on specific pod
+pi start model --name mymodel --vllm --disable-tool-call-parser
 ```
 
-The command shows:
-- Model name and current size
-- Download progress (files downloaded / total files)
-- Download status (⏬ Downloading or ⏸ Idle)
-- Estimated total size (if available from HuggingFace)
+## Memory and Context Management
 
-**Tip for large models**: When starting models like Qwen-480B that take time to download, run `pi start` in one terminal and `pi downloads --live` in another to monitor progress. This is especially helpful since the log output during downloads can be minimal.
+### GPU Memory Allocation
+Controls how much GPU memory vLLM pre-allocates:
+- `--memory 30%`: High concurrency, limited context
+- `--memory 50%`: Balanced (default)
+- `--memory 90%`: Maximum context, low concurrency
 
-**Downloads stalled?** If downloads appear stuck (e.g., at 92%), you can safely stop and restart:
+### Context Window
+Sets maximum input + output tokens:
+- `--context 4k`: 4,096 tokens total
+- `--context 32k`: 32,768 tokens total
+- `--context 128k`: 131,072 tokens total
+
+Example for coding workload:
 ```bash
-pi stop <model-name>         # Stop the current process
-pi downloads                 # Verify progress (e.g., 45/49 files)
-pi start <same-command>      # Restart with the same command
+# Large context for code analysis, moderate concurrency
+pi start Qwen/Qwen2.5-Coder-32B-Instruct --name coder \
+  --context 64k --memory 70%
 ```
-vLLM will automatically use the already-downloaded files and continue from where it left off. This often resolves network or CDN throttling issues.
+
+These settings will be ignored if you also specify `--vllm`.
+
+## Session Persistence
+
+The interactive prompt mode (`-i`) saves sessions for each project directory:
+
+```bash
+# Start new session
+pi prompt qwen -i
+
+# Continue previous session (maintains chat history)
+pi prompt qwen -i -c
+```
+
+Sessions are stored in `~/.pi/sessions/` organized by project path.
 
 ## Troubleshooting
 
-- **OOM Errors**: Reduce gpu_fraction or use a smaller model
-- **Slow Inference**: Could be too many concurrent requests, try increasing gpu_fraction
-- **Connection Refused**: Check pod is running and port is correct
-- **HF Token Issues**: Ensure HF_TOKEN is set before running setup
-- **Access Denied**: Some models (like Llama, Mistral) require completing an access request on HuggingFace first. Visit the model page and click "Request access"
-- **Tool Calling Errors**: See the Tool Calling section above - consider disabling it or using a different model
-- **Model Won't Stop**: If `pi stop` fails, force kill all Python processes and verify GPU is free:
-  ```bash
-  pi ssh "killall -9 python3"
-  pi ssh "nvidia-smi"  # Should show no processes using GPU
-  ```
-- **Model Deployment Fails**: Pi currently does not check GPU memory utilization before starting models. If deploying a model fails:
-  1. Check if GPUs are full with other models: `pi ssh "nvidia-smi"`
-  2. If memory is insufficient, make room by stopping running models: `pi stop <model_name>`
-  3. If the error persists with sufficient memory, copy the error output and feed it to an LLM for troubleshooting assistance
+### OOM (Out of Memory) Errors
+- Reduce `--memory` percentage
+- Use smaller model or quantized version (FP8)
+- Reduce `--context` size
 
-## Timing notes
-- 8x B200 on DataCrunch, Spot instance
-   - pi setup
-      - 1:27 min
-   - pi start Qwen/Qwen3-Coder-30B-A3B-Instruct
-      - (cold start incl. HF download, kernel warmup) 7:32m
-      - (warm start, HF model already in cache) 1:02m
+### Model Won't Start
+```bash
+# Check GPU usage
+pi ssh "nvidia-smi"
 
-- 8x H200 on DataCrunch, Spot instance
-   - pi setup
-      -2:04m
-   - pi start Qwen/Qwen3-Coder-30B-A3B-Instruct
-      - (cold start incl. HF download, kernel warmup) 9:30m
-      - (warm start, HF model already in cache) 1:14m
-   - pi start Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 ...
-      - (cold start incl. HF download, kernel warmup)
-      - (warm start, HF model already in cache)
+# Check if port is in use
+pi list
+
+# Force stop all models
+pi stop
+```
+
+### Tool Calling Issues
+- Not all models support tool calling reliably
+- Try different parser: `--vllm --tool-call-parser mistral`
+- Or disable: `--vllm --disable-tool-call-parser`
+
+### Access Denied for Models
+Some models (Llama, Mistral) require HuggingFace access approval. Visit the model page and click "Request access".
+
+### vLLM Build Issues
+If using `--vllm nightly` fails, try:
+- Use `--vllm release` for stable version
+- Check CUDA compatibility with `pi ssh "nvidia-smi"`
+
+## Advanced Usage
+
+### Working with Multiple Pods
+```bash
+# Override active pod for any command
+pi start model --name test --pod dev-pod
+pi list --pod prod-pod
+pi stop test --pod dev-pod
+```
+
+### Custom vLLM Arguments
+```bash
+# Pass any vLLM argument after --vllm
+pi start model --name custom --vllm \
+  --quantization awq \
+  --enable-prefix-caching \
+  --max-num-seqs 256 \
+  --gpu-memory-utilization 0.95
+```
+
+### Monitoring
+```bash
+# Watch GPU utilization
+pi ssh "watch -n 1 nvidia-smi"
+
+# Check model downloads
+pi ssh "du -sh ~/.cache/huggingface/hub/*"
+
+# View all logs
+pi ssh "ls -la ~/.vllm_logs/"
+```
+
+## License
+
+MIT

@@ -8,7 +8,7 @@ Pods are treated as ephemeral - spin up when needed, tear down when done. To avo
 
 ### Pods
 ```bash
-pi pods setup dc1 "ssh root@1.2.3.4" --storage "mount -t nfs..."  # Setup pod (requires HF_TOKEN, VLLM_API_KEY env vars)
+pi pods setup dc1 "ssh root@1.2.3.4" --mount "mount -t nfs..."  # Setup pod (requires HF_TOKEN, VLLM_API_KEY env vars)
 pi pods                              # List all pods (* = active)
 pi pods active dc2                   # Switch active pod
 pi pods remove dc1                   # Remove pod
@@ -39,7 +39,7 @@ Key capabilities:
 When a user creates a fresh pod on a provider, they register it with pi using the SSH command from the provider:
 
 ```bash
-pi pods setup dc1 "ssh root@1.2.3.4" --storage "mount -t nfs..."
+pi pods setup dc1 "ssh root@1.2.3.4" --mount "mount -t nfs..."
 ```
 
 This copies and executes `pod_setup.sh` which:
@@ -62,14 +62,14 @@ Required environment variables:
 
 ### Model caching
 
-Models can be 100GB+ and take 30+ minutes to download. The `--storage` flag enables persistent model caching:
+Models can be 100GB+ and take 30+ minutes to download. The `--mount` flag enables persistent model caching:
 
 - **DataCrunch**: NFS shared filesystems, mountable across multiple running pods in same region
 - **RunPod**: Network volumes persist independently but cannot be shared between running pods
 - **Vast.ai**: Volumes locked to specific machine - no sharing
 - **Prime Intellect**: No persistent storage documented
 
-Without `--storage`, models download to pod-local storage and are lost on termination.
+Without `--mount`, models download to pod-local storage and are lost on termination.
 
 ### Multi-pod management
 

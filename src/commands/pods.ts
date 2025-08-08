@@ -44,7 +44,7 @@ export const listPods = () => {
 export const setupPod = async (
 	name: string,
 	sshCmd: string,
-	options: { storage?: string; modelsPath?: string; vllm?: "release" | "source" | "gpt-oss" },
+	options: { mount?: string; modelsPath?: string; vllm?: "release" | "nightly" | "gpt-oss" },
 ) => {
 	// Validate environment variables
 	const hfToken = process.env.HF_TOKEN;
@@ -65,15 +65,15 @@ export const setupPod = async (
 
 	// Determine models path
 	let modelsPath = options.modelsPath;
-	if (!modelsPath && options.storage) {
+	if (!modelsPath && options.mount) {
 		// Extract path from mount command if not explicitly provided
 		// e.g., "mount -t nfs ... /mnt/sfs" -> "/mnt/sfs"
-		const parts = options.storage.split(" ");
+		const parts = options.mount.split(" ");
 		modelsPath = parts[parts.length - 1];
 	}
 
 	if (!modelsPath) {
-		console.error(chalk.red("ERROR: --models-path is required (or must be extractable from --storage)"));
+		console.error(chalk.red("ERROR: --models-path is required (or must be extractable from --mount)"));
 		process.exit(1);
 	}
 
@@ -83,8 +83,8 @@ export const setupPod = async (
 	console.log(
 		`vLLM version: ${options.vllm || "release"} ${options.vllm === "gpt-oss" ? chalk.yellow("(GPT-OSS special build)") : ""}`,
 	);
-	if (options.storage) {
-		console.log(`Storage mount: ${options.storage}`);
+	if (options.mount) {
+		console.log(`Mount command: ${options.mount}`);
 	}
 	console.log("");
 
@@ -110,8 +110,8 @@ export const setupPod = async (
 
 	// Build setup command
 	let setupCmd = `bash /tmp/pod_setup.sh --models-path '${modelsPath}' --hf-token '${hfToken}' --vllm-api-key '${vllmApiKey}'`;
-	if (options.storage) {
-		setupCmd += ` --storage-mount '${options.storage}'`;
+	if (options.mount) {
+		setupCmd += ` --mount '${options.mount}'`;
 	}
 	// Add vLLM version flag
 	const vllmVersion = options.vllm || "release";

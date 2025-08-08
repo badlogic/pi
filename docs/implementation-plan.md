@@ -17,7 +17,7 @@ Generate and execute pod_setup.sh via SSH
   - [ ] Generate venv creation commands
   - [ ] Generate pip install commands (torch, vLLM, etc.)
   - [ ] Handle model-specific vLLM versions (e.g., gpt-oss needs 0.10.1+gptoss)
-  - [ ] Generate storage mount commands if --storage provided
+  - [ ] Generate mount commands if --mount provided
   - [ ] Generate env var setup (HF_TOKEN, VLLM_API_KEY)
 
 - [ ] `src/setup/detect-hardware.ts` - Run nvidia-smi and parse GPU info
@@ -36,7 +36,7 @@ Generate and execute pod_setup.sh via SSH
 Local JSON state management
 
 - [ ] `src/config/types.ts` - TypeScript interfaces
-  - [ ] Pod interface (ssh, gpus, models, storage)
+  - [ ] Pod interface (ssh, gpus, models, mount)
   - [ ] Model interface (model, port, gpu, pid)
   - [ ] GPU interface (id, name, memory)
 
@@ -61,7 +61,7 @@ Clean SSH command execution
 Pod management CLI commands
 
 - [ ] `src/commands/pods-setup.ts` - pi pods setup
-  - [ ] Parse args (name, ssh, storage)
+  - [ ] Parse args (name, ssh, mount)
   - [ ] Check env vars (HF_TOKEN, VLLM_API_KEY)
   - [ ] Call setup executor
   - [ ] Save pod to config

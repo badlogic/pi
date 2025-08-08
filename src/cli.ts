@@ -19,10 +19,10 @@ function printHelp() {
 	console.log(`pi v${packageJson.version} - Manage vLLM deployments on GPU pods
 
 Pod Management:
-  pi pods setup <name> "<ssh>" --storage "<mount>"  Setup pod with storage mount
+  pi pods setup <name> "<ssh>" --mount "<mount>"    Setup pod with mount command
     Options:
       --vllm release    Install latest vLLM release >=0.10.0 (default)
-      --vllm source     Build vLLM from latest GitHub source (for GLM-4.5 etc)
+      --vllm nightly    Install vLLM nightly build (latest features)
       --vllm gpt-oss    Install vLLM 0.10.1+gptoss with PyTorch nightly (GPT-OSS only)
   pi pods                                           List all pods (* = active)
   pi pods active <name>                             Switch active pod
@@ -70,43 +70,43 @@ try {
 			// pi pods - list all pods
 			listPods();
 		} else if (subcommand === "setup") {
-			// pi pods setup <name> "<ssh>" [--storage "<mount>"] [--models-path <path>] [--vllm release|source|gpt-oss]
+			// pi pods setup <name> "<ssh>" [--mount "<mount>"] [--models-path <path>] [--vllm release|nightly|gpt-oss]
 			const name = args[2];
 			const sshCmd = args[3];
 
 			if (!name || !sshCmd) {
 				console.error(
-					'Usage: pi pods setup <name> "<ssh>" [--storage "<mount>"] [--models-path <path>] [--vllm release|source|gpt-oss]',
+					'Usage: pi pods setup <name> "<ssh>" [--mount "<mount>"] [--models-path <path>] [--vllm release|nightly|gpt-oss]',
 				);
 				process.exit(1);
 			}
 
 			// Parse options
-			const options: { storage?: string; modelsPath?: string; vllm?: "release" | "source" | "gpt-oss" } = {};
+			const options: { mount?: string; modelsPath?: string; vllm?: "release" | "nightly" | "gpt-oss" } = {};
 			for (let i = 4; i < args.length; i++) {
-				if (args[i] === "--storage" && i + 1 < args.length) {
-					options.storage = args[i + 1];
+				if (args[i] === "--mount" && i + 1 < args.length) {
+					options.mount = args[i + 1];
 					i++;
 				} else if (args[i] === "--models-path" && i + 1 < args.length) {
 					options.modelsPath = args[i + 1];
 					i++;
 				} else if (args[i] === "--vllm" && i + 1 < args.length) {
 					const vllmType = args[i + 1];
-					if (vllmType === "release" || vllmType === "source" || vllmType === "gpt-oss") {
+					if (vllmType === "release" || vllmType === "nightly" || vllmType === "gpt-oss") {
 						options.vllm = vllmType;
 					} else {
 						console.error(chalk.red(`Invalid vLLM type: ${vllmType}`));
-						console.error("Valid options: release, source, gpt-oss");
+						console.error("Valid options: release, nightly, gpt-oss");
 						process.exit(1);
 					}
 					i++;
 				}
 			}
 
-			// If --storage provided but no --models-path, try to extract path from mount command
-			if (options.storage && !options.modelsPath) {
+			// If --mount provided but no --models-path, try to extract path from mount command
+			if (options.mount && !options.modelsPath) {
 				// Extract last part of mount command as models path
-				const parts = options.storage.trim().split(" ");
+				const parts = options.mount.trim().split(" ");
 				const lastPart = parts[parts.length - 1];
 				if (lastPart?.startsWith("/")) {
 					options.modelsPath = lastPart;

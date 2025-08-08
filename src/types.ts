@@ -18,7 +18,7 @@ export interface Pod {
 	gpus: GPU[];
 	models: Record<string, Model>;
 	modelsPath?: string;
-	vllmVersion?: "release" | "source" | "gpt-oss"; // Track which vLLM version is installed
+	vllmVersion?: "release" | "nightly" | "gpt-oss"; // Track which vLLM version is installed
 }
 
 export interface Config {

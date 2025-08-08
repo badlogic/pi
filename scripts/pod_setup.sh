@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Parse arguments passed from pi CLI
-STORAGE_MOUNT=""
+MOUNT_COMMAND=""
 MODELS_PATH=""
 HF_TOKEN=""
 VLLM_API_KEY=""
@@ -11,8 +11,8 @@ VLLM_VERSION="release"  # Default to release
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --storage-mount)
-            STORAGE_MOUNT="$2"
+        --mount)
+            MOUNT_COMMAND="$2"
             shift 2
             ;;
         --models-path)
@@ -173,83 +173,19 @@ case "$VLLM_VERSION" in
             exit 1
         }
         ;;
-    source)
-        echo "Installing PyTorch (stable) and building vLLM from source..."
-        # Install stable PyTorch
-        echo "Installing PyTorch with CUDA support..."
-        uv pip install torch --torch-backend=auto -v || {
-            echo "ERROR: Failed to install PyTorch"
-            exit 1
-        }
-        echo "Building vLLM from source (latest main branch)..."
-        echo "This will take 10-15 minutes..."
-        echo "Build output will be verbose to show progress..."
+    nightly)
+        echo "Installing vLLM nightly with PyTorch..."
+        echo "This will install the latest nightly build of vLLM..."
         
-        # Install basic build tools
-        echo "Installing basic build tools..."
-        uv pip install ninja wheel -v || {
-            echo "ERROR: Failed to install basic build tools"
+        # Install vLLM nightly with PyTorch
+        uv pip install -U vllm \
+            --torch-backend=auto \
+            --extra-index-url https://wheels.vllm.ai/nightly || {
+            echo "ERROR: Failed to install vLLM nightly"
             exit 1
         }
         
-        # Clone and install from source
-        cd /tmp
-        rm -rf vllm
-        echo "Cloning vLLM repository..."
-        git clone --depth 1 https://github.com/vllm-project/vllm.git || {
-            echo "ERROR: Failed to clone vLLM repository"
-            exit 1
-        }
-        cd vllm
-        
-        # Use the existing PyTorch installation approach
-        echo "Configuring vLLM to use existing PyTorch installation..."
-        python use_existing_torch.py || {
-            echo "ERROR: Failed to configure existing PyTorch"
-            exit 1
-        }
-        
-        # Install build requirements
-        echo "Installing vLLM build requirements..."
-        if [ -f requirements/build.txt ]; then
-            uv pip install -r requirements/build.txt -v || {
-                echo "ERROR: Failed to install build requirements"
-                exit 1
-            }
-        else
-            echo "WARNING: requirements/build.txt not found, continuing anyway"
-        fi
-        
-        # Set environment variables for verbose build
-        export VERBOSE=1
-        export CMAKE_VERBOSE_MAKEFILE=ON
-        export NVCC_PREPEND_FLAGS="-v"  # Show nvcc compilation details
-        
-        echo "Starting vLLM build (this WILL take 10-15 minutes)..."
-        echo "Build will show detailed progress..."
-        
-        # Verify we're in the venv and packages are installed
-        echo "Python: $(which python)"
-        echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'Not found')"
-        
-        # Run build directly with minimal verbosity
-        echo "Starting vLLM build (this WILL take 10-20 minutes)..."
-        echo "Build output:"
-        uv pip install --no-build-isolation -e . || {
-            echo "ERROR: vLLM build failed"
-            exit 1
-        }
-        
-        # Check if install succeeded (pipe above always returns 0)
-        if ! python -c "import vllm" 2>/dev/null; then
-            echo "ERROR: vLLM build completed but import failed"
-            echo "Trying to show detailed error:"
-            python -c "import vllm"
-            exit 1
-        fi
-        
-        echo "vLLM successfully built from source!"
-        cd /
+        echo "vLLM nightly successfully installed!"
         ;;
     gpt-oss)
         echo "Installing GPT-OSS special build with PyTorch nightly..."
@@ -295,14 +231,14 @@ else
 fi
 
 # --- Mount storage if provided -----------------------------------------------
-if [ -n "$STORAGE_MOUNT" ]; then
-    echo "Setting up storage mount..."
+if [ -n "$MOUNT_COMMAND" ]; then
+    echo "Setting up mount..."
     
     # Create mount point directory if it doesn't exist
     mkdir -p "$MODELS_PATH"
     
     # Execute the mount command
-    eval "$STORAGE_MOUNT" || {
+    eval "$MOUNT_COMMAND" || {
         echo "WARNING: Mount command failed, continuing without mount"
     }
     
