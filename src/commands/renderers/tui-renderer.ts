@@ -117,8 +117,7 @@ export class TuiRenderer implements AgentRenderer {
 					this.currentLoadingAnimation = null;
 				}
 
-				// Show interruption message
-				this.chatContainer.addChild(new TextComponent(chalk.red("[Interrupted by user]"), { bottom: 1 }));
+				// Don't show message here - the interrupted event will handle it
 
 				// Re-enable editor submission
 				this.editor.disableSubmit = false;
@@ -265,6 +264,19 @@ export class TuiRenderer implements AgentRenderer {
 				this.lastCompletionTokens = event.completionTokens;
 				this.lastTotalTokens = event.totalTokens;
 				this.updateTokenDisplay();
+				break;
+
+			case "interrupted":
+				// Stop the loading animation
+				if (this.currentLoadingAnimation) {
+					this.currentLoadingAnimation.stop();
+					this.currentLoadingAnimation = null;
+					this.statusContainer.clear();
+				}
+				// Show interrupted message
+				this.chatContainer.addChild(new TextComponent(chalk.red("[Interrupted by user]"), { bottom: 1 }));
+				// Re-enable editor submission
+				this.editor.disableSubmit = false;
 				break;
 		}
 

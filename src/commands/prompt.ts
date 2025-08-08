@@ -218,6 +218,9 @@ Current working directory: ${process.cwd()}
 						result: output,
 						isError,
 					});
+				} else if (msg.type === "event" && msg.data?.type === "interrupted") {
+					// Render interrupted event from session
+					await renderer.render({ type: "interrupted" });
 				}
 			}
 		}

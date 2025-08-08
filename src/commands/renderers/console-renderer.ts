@@ -48,6 +48,14 @@ export class ConsoleRenderer implements AgentRenderer {
 				console.log(event.text);
 				console.log();
 				break;
+
+			case "interrupted":
+				console.log(chalk.red("[Interrupted by user]\n"));
+				break;
+
+			case "token_usage":
+				// Token usage is not displayed in console mode
+				break;
 		}
 	}
 }

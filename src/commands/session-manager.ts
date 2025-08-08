@@ -144,6 +144,15 @@ export class SessionManager {
 		appendFileSync(this.sessionFile, JSON.stringify(entry) + "\n");
 	}
 
+	logEvent(event: { type: string; [key: string]: any }): void {
+		const entry = {
+			type: "event",
+			timestamp: new Date().toISOString(),
+			data: event,
+		};
+		appendFileSync(this.sessionFile, JSON.stringify(entry) + "\n");
+	}
+
 	loadSession(): SessionData | null {
 		if (!existsSync(this.sessionFile)) return null;
 
@@ -166,6 +175,9 @@ export class SessionManager {
 					this.sessionId = entry.id;
 				} else if (entry.type === "message") {
 					messages.push(entry.data);
+				} else if (entry.type === "event") {
+					// Store events as special messages so they can be rendered when restoring
+					messages.push({ type: "event", ...entry });
 				} else if (entry.type === "usage") {
 					// Accumulate usage for session summary
 					totalUsage.prompt_tokens += entry.data.prompt_tokens || 0;

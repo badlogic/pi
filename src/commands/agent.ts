@@ -69,6 +69,7 @@ export type AgentEvent =
 	| { type: "assistant_message"; text: string }
 	| { type: "error"; message: string }
 	| { type: "user_message"; text: string }
+	| { type: "interrupted" }
 	| { type: "token_usage"; promptTokens: number; completionTokens: number; totalTokens: number };
 
 export interface AgentRenderer {
@@ -713,6 +714,9 @@ export class Agent {
 
 	interrupt(): void {
 		if (this.abortController) {
+			// Emit interrupted event
+			this.renderer.render({ type: "interrupted" });
+			this.sessionManager?.logEvent({ type: "interrupted" });
 			this.abortController.abort();
 		}
 	}
