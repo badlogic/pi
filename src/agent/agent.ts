@@ -473,6 +473,7 @@ export async function main(args: string[]): Promise<void> {
 	let continueSession = false;
 	let api: "completions" | "responses" = "completions";
 	let systemPrompt = "You are a helpful assistant.";
+	let jsonOutput = false;
 
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--base-url" && i + 1 < args.length) {
@@ -487,6 +488,8 @@ export async function main(args: string[]): Promise<void> {
 			api = args[++i] as "completions" | "responses";
 		} else if (args[i] === "--system-prompt" && i + 1 < args.length) {
 			systemPrompt = args[++i];
+		} else if (args[i] === "--json") {
+			jsonOutput = true;
 		} else if (args[i] === "--help" || args[i] === "-h") {
 			console.log(`Usage: node agent.js [options] [message]
 
@@ -497,6 +500,7 @@ Options:
   --api <type>            API type: "completions" or "responses" (default: completions)
   --system-prompt <text>  System prompt (default: "You are a helpful assistant.")
   --continue              Continue previous session
+  --json                  Output event stream as JSONL (single message mode only)
   --help, -h              Show this help message
 
 Examples:
@@ -527,7 +531,8 @@ Examples:
 		if (args[i].startsWith("--")) {
 			// Check if this flag takes a value
 			const flag = args[i];
-			if (flag === "--continue" || flag === "--help" || flag === "-h") {
+			if (flag === "--continue" || flag === "--json" || flag === "--help" || flag === "-h") {
+				// These flags don't take values
 			} else {
 				// All other flags take a value, skip the next arg
 				skipNext = true;
@@ -547,10 +552,18 @@ Examples:
 	const { ConsoleRenderer } = await import("./renderers/console-renderer.js");
 	const { SessionManager } = await import("./session-manager.js");
 	const { TuiRenderer } = await import("./renderers/tui-renderer.js");
+	const { JsonRenderer } = await import("./renderers/json-renderer.js");
 
-	// Create renderer based on whether we have a message
+	// Create renderer based on mode
 	const isInteractive = !message;
-	const renderer = isInteractive ? new TuiRenderer() : new ConsoleRenderer();
+	let renderer: AgentEventReceiver;
+	if (isInteractive) {
+		renderer = new TuiRenderer();
+	} else if (jsonOutput) {
+		renderer = new JsonRenderer();
+	} else {
+		renderer = new ConsoleRenderer();
+	}
 
 	// Show configuration in interactive mode
 	if (isInteractive) {

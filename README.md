@@ -31,10 +31,10 @@ pi pods setup dc1 "ssh root@1.2.3.4" \
 # Start a model (automatic configuration for known models)
 pi start Qwen/Qwen2.5-Coder-32B-Instruct --name qwen
 
-# Chat with the model using the agent
+# Send a single message to the model
 pi agent qwen "What is the Fibonacci sequence?"
 
-# Or interactive mode with file system tools
+# Interactive chat mode with file system tools
 pi agent qwen -i
 
 # Use with any OpenAI-compatible client
@@ -70,7 +70,7 @@ export OPENAI_API_KEY=$PI_API_KEY
 - Vast.ai (volumes locked to specific machine)
 - Prime Intellect (no persistent storage)
 - AWS EC2 (with EFS setup)
-- Any Ubuntu machine with GPUs and SSH
+- Any Ubuntu machine with NVIDIA GPUs, CUDA driver, and SSH
 
 ## Commands
 
@@ -123,6 +123,7 @@ pi agent <name> -i -c                     # Continue previous session
 # Standalone OpenAI-compatible agent (works with any API)
 pi-agent --base-url http://localhost:8000/v1 --model llama-3.1 "Hello"
 pi-agent --api-key sk-... "What is 2+2?"  # Uses OpenAI by default
+pi-agent --json "What is 2+2?"            # Output event stream as JSONL
 pi-agent -i                                # Interactive mode
 ```
 
@@ -402,8 +403,24 @@ The agent uses a unified event-based architecture where all interactions flow th
 - Consistent UI rendering across console and TUI modes
 - Session recording and replay
 - Clean separation between API calls and UI updates
+- JSON output mode for programmatic integration
 
 Events are automatically converted to the appropriate API format (Chat Completions or Responses) based on the model type.
+
+### JSON Output Mode
+
+Use `--json` flag to output the event stream as JSONL (JSON Lines) for programmatic consumption:
+```bash
+pi-agent --api-key sk-... --json "What is 2+2?"
+```
+
+Each line is a complete JSON object representing an event:
+```jsonl
+{"type":"user_message","text":"What is 2+2?"}
+{"type":"assistant_start"}
+{"type":"assistant_message","text":"2 + 2 = 4"}
+{"type":"token_usage","inputTokens":10,"outputTokens":5,"totalTokens":15,"cacheReadTokens":0,"cacheWriteTokens":0}
+```
 
 ## Troubleshooting
 
