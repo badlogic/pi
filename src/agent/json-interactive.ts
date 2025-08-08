@@ -1,6 +1,5 @@
 import { createInterface } from "readline";
-import type { Agent } from "./agent.js";
-import type { AgentEventReceiver } from "./agent.js";
+import type { Agent, AgentEventReceiver } from "./agent.js";
 
 interface JsonCommand {
 	type: "message" | "interrupt";
@@ -41,18 +40,18 @@ export class JsonInteractive {
 	private handleInput(line: string): void {
 		try {
 			const command = JSON.parse(line) as JsonCommand;
-			
+
 			switch (command.type) {
 				case "interrupt":
 					this.agent.interrupt();
 					break;
-					
+
 				case "message":
 					if (!command.content) {
 						this.renderer.on({ type: "error", message: "Message content is required" });
 						return;
 					}
-					
+
 					if (this.isProcessing) {
 						// Queue the message for when the agent is done
 						this.pendingMessage = command.content;
@@ -60,7 +59,7 @@ export class JsonInteractive {
 						this.processMessage(command.content);
 					}
 					break;
-					
+
 				default:
 					this.renderer.on({ type: "error", message: `Unknown command type: ${(command as any).type}` });
 			}
@@ -71,14 +70,14 @@ export class JsonInteractive {
 
 	private async processMessage(content: string): Promise<void> {
 		this.isProcessing = true;
-		
+
 		try {
 			await this.agent.ask(content);
 		} catch (e: any) {
 			await this.renderer.on({ type: "error", message: e.message });
 		} finally {
 			this.isProcessing = false;
-			
+
 			// Process any pending message
 			if (this.pendingMessage) {
 				const msg = this.pendingMessage;

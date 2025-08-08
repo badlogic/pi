@@ -155,10 +155,6 @@ export class TuiRenderer implements AgentEventReceiver {
 			text = text.trim();
 			if (!text) return;
 
-			// Don't show user message here - let the event system handle it
-			// This ensures consistency between live input and restored sessions
-
-			// Trigger callback if set
 			if (this.onInputCallback) {
 				this.onInputCallback(text);
 			}

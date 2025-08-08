@@ -340,7 +340,6 @@ export class Agent {
 		} catch (e: any) {
 			// Check if this was an interruption
 			if (e.message === "Interrupted" || this.abortController.signal.aborted) {
-				// Don't show another message - TUI already shows it
 				return;
 			}
 			throw e;

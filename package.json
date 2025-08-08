@@ -44,12 +44,12 @@
 	"preferGlobal": true,
 	"dependencies": {
 		"@ai-sdk/openai": "^2.0.5",
+		"@mariozechner/tui": "file:../tui",
 		"ai": "^5.0.8",
 		"chalk": "^5.5.0",
+		"glob": "^11.0.3",
 		"openai": "^5.12.1",
-		"zod": "^3.25.76",
-		"@mariozechner/tui": "0.1.0",
-    	"glob": "^11.0.3"
+		"zod": "^3.25.76"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.1.3",

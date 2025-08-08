@@ -1,48 +1,58 @@
 #!/usr/bin/env node
+import type { AgentEventReceiver } from "./agent.js";
 import { Agent } from "./agent.js";
-import type { AgentConfig, AgentEventReceiver } from "./agent.js";
+import { parseArgs, printHelp } from "./args.js";
+
+// Define argument structure
+const argDefs = {
+	"base-url": {
+		type: "string" as const,
+		default: "https://api.openai.com/v1",
+		description: "API base URL",
+	},
+	"api-key": {
+		type: "string" as const,
+		default: process.env.OPENAI_API_KEY || "",
+		description: "API key (or set OPENAI_API_KEY)",
+	},
+	model: {
+		type: "string" as const,
+		default: "gpt-4o-mini",
+		description: "Model name",
+	},
+	api: {
+		type: "string" as const,
+		default: "completions",
+		description: 'API type: "completions" or "responses"',
+	},
+	"system-prompt": {
+		type: "string" as const,
+		default: "You are a helpful assistant.",
+		description: "System prompt",
+	},
+	continue: {
+		type: "flag" as const,
+		description: "Continue previous session",
+	},
+	json: {
+		type: "flag" as const,
+		description: "Output as JSONL",
+	},
+	help: {
+		type: "flag" as const,
+		alias: "h",
+		description: "Show this help message",
+	},
+};
 
 // Main function to use Agent as standalone CLI
 export async function main(args: string[]): Promise<void> {
-	// Parse command line arguments
-	let baseURL = "https://api.openai.com/v1";
-	let apiKey = process.env.OPENAI_API_KEY || "";
-	let model = "gpt-4o-mini";
-	let continueSession = false;
-	let api: "completions" | "responses" = "completions";
-	let systemPrompt = "You are a helpful assistant.";
-	let jsonOutput = false;
+	// Parse arguments
+	const parsed = parseArgs(argDefs, args);
 
-	// Collect messages (non-flag arguments)
-	const messages: string[] = [];
-	
-	for (let i = 0; i < args.length; i++) {
-		if (args[i] === "--base-url" && i + 1 < args.length) {
-			baseURL = args[++i];
-		} else if (args[i] === "--api-key" && i + 1 < args.length) {
-			apiKey = args[++i];
-		} else if (args[i] === "--model" && i + 1 < args.length) {
-			model = args[++i];
-		} else if (args[i] === "--continue") {
-			continueSession = true;
-		} else if (args[i] === "--api" && i + 1 < args.length) {
-			api = args[++i] as "completions" | "responses";
-		} else if (args[i] === "--system-prompt" && i + 1 < args.length) {
-			systemPrompt = args[++i];
-		} else if (args[i] === "--json") {
-			jsonOutput = true;
-		} else if (args[i] === "--help" || args[i] === "-h") {
-			console.log(`Usage: pi-agent [options] [messages...]
-
-Options:
-  --base-url <url>        API base URL (default: https://api.openai.com/v1)
-  --api-key <key>         API key (or set OPENAI_API_KEY env var)
-  --model <model>         Model name (default: gpt-4o-mini)
-  --api <type>            API type: "completions" or "responses" (default: completions)
-  --system-prompt <text>  System prompt (default: "You are a helpful assistant.")
-  --continue              Continue previous session
-  --json                  Output as JSONL (for both single-shot and interactive modes)
-  --help, -h              Show this help message
+	// Show help if requested
+	if (parsed.help) {
+		const usage = `Usage: pi-agent [options] [messages...]
 
 Examples:
   # Single message
@@ -64,15 +74,21 @@ Examples:
   pi-agent --continue "Follow up question"
 
   # Use local vLLM
-  pi-agent --base-url http://localhost:8000/v1 --model meta-llama/Llama-3.1-8B-Instruct "Hello"
-`);
-			return;
-		} else if (!args[i].startsWith("-")) {
-			// This is a message (not a flag)
-			messages.push(args[i]);
-		}
-		// Ignore unrecognized flags
+  pi-agent --base-url http://localhost:8000/v1 --model meta-llama/Llama-3.1-8B-Instruct "Hello"`;
+
+		printHelp(argDefs, usage);
+		return;
 	}
+
+	// Extract configuration from parsed args
+	const baseURL = parsed["base-url"];
+	const apiKey = parsed["api-key"];
+	const model = parsed.model;
+	const continueSession = parsed.continue;
+	const api = parsed.api as "completions" | "responses";
+	const systemPrompt = parsed["system-prompt"];
+	const jsonOutput = parsed.json;
+	const messages = parsed._; // Positional arguments
 
 	if (!apiKey) {
 		throw new Error("API key required (use --api-key or set OPENAI_API_KEY)");
@@ -86,7 +102,7 @@ Examples:
 
 	// Determine mode: interactive if no messages provided
 	const isInteractive = messages.length === 0;
-	
+
 	// Create renderer based on mode and json flag
 	let renderer: AgentEventReceiver;
 	if (jsonOutput) {
