@@ -140,88 +140,22 @@ Current working directory: ${process.cwd()}
 
 		// Render restored session history if continuing
 		if (hasRestoredSession && restoredMessages.length > 0) {
-			// Render previous messages (skip system prompt)
+			// Render previous messages
 			for (const msg of restoredMessages) {
+				// Skip system messages
 				if (msg.role === "system") continue;
 
-				if (msg.role === "user") {
-					await renderer.render({ type: "user_message", text: msg.content });
-				} else if (msg.role === "assistant") {
-					// Assistant messages can have content, tool_calls, or both
-					// For restored messages, just show the label without animations
-					renderer.renderAssistantLabel();
-
-					// Render tool calls if present
-					if (msg.tool_calls && msg.tool_calls.length > 0) {
-						for (const toolCall of msg.tool_calls) {
-							const funcName = toolCall.type === "function" ? toolCall.function.name : toolCall.custom?.name;
-							const funcArgs =
-								toolCall.type === "function" ? toolCall.function.arguments : toolCall.custom?.input;
-							await renderer.render({
-								type: "tool_call",
-								name: funcName || "unknown",
-								args: funcArgs || "{}",
-							});
-						}
+				// If this is a stored event, replay it directly
+				if (msg.type === "event" && msg.data) {
+					const event = msg.data;
+					// For assistant_start events, use renderAssistantLabel to avoid animation
+					if (event.type === "assistant_start") {
+						renderer.renderAssistantLabel();
+					} else {
+						await renderer.render(event);
 					}
-
-					// Render content if present
-					if (msg.content) {
-						await renderer.render({ type: "assistant_message", text: msg.content });
-					}
-				} else if (msg.role === "tool") {
-					// Tool result message - detect if it was an error
-					const content = msg.content || "";
-					const isError =
-						content.includes("Command failed") ||
-						content.includes("Error:") ||
-						content.includes("error:") ||
-						content.includes("The operation was aborted");
-					await renderer.render({
-						type: "tool_result",
-						result: content,
-						isError,
-					});
-				} else if (msg.type === "reasoning") {
-					// Reasoning/thinking message (for GPT-OSS)
-					for (const content of msg.content || []) {
-						if (content.type === "reasoning_text") {
-							await renderer.render({ type: "thinking", text: content.text });
-						}
-					}
-				} else if (msg.type === "message") {
-					// Regular message (for GPT-OSS)
-					// For restored messages, just show the label without animations
-					renderer.renderAssistantLabel();
-					for (const content of msg.content || []) {
-						if (content.type === "output_text") {
-							await renderer.render({ type: "assistant_message", text: content.text });
-						}
-					}
-				} else if (msg.type === "function_call") {
-					// Function call (for GPT-OSS)
-					await renderer.render({
-						type: "tool_call",
-						name: msg.name || "unknown",
-						args: msg.arguments || "{}",
-					});
-				} else if (msg.type === "function_call_output") {
-					// Function output (for GPT-OSS) - detect if it was an error
-					const output = msg.output || "";
-					const isError =
-						output.includes("Command failed") ||
-						output.includes("Error:") ||
-						output.includes("error:") ||
-						output.includes("The operation was aborted");
-					await renderer.render({
-						type: "tool_result",
-						result: output,
-						isError,
-					});
-				} else if (msg.type === "event" && msg.data?.type === "interrupted") {
-					// Render interrupted event from session
-					await renderer.render({ type: "interrupted" });
 				}
+				// Otherwise skip raw messages - we only care about events for rendering
 			}
 		}
 

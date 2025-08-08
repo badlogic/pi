@@ -425,8 +425,10 @@ export async function callModelResponses(
 
 			try {
 				renderer.render({ type: "tool_call", name: toolCall.name, args: toolCall.arguments });
+				sessionManager?.logEvent({ type: "tool_call", name: toolCall.name, args: toolCall.arguments });
 				const result = await executeTool(toolCall.name, toolCall.arguments, signal);
 				renderer.render({ type: "tool_result", result, isError: false });
+				sessionManager?.logEvent({ type: "tool_result", result, isError: false });
 
 				// Add tool result to messages
 				const toolResultMsg = {
@@ -439,6 +441,7 @@ export async function callModelResponses(
 				logMessage(toolResultMsg, `callGptOssModel:after_tool_${toolCall.name}_success`);
 			} catch (e: any) {
 				renderer.render({ type: "tool_result", result: e.message, isError: true });
+				sessionManager?.logEvent({ type: "tool_result", result: e.message, isError: true });
 				const errorMsg = {
 					type: "function_call_output",
 					call_id: toolCall.id,
@@ -589,10 +592,12 @@ export async function callModelChat(
 				const funcName = toolCall.type === "function" ? toolCall.function.name : toolCall.custom.name;
 				const funcArgs = toolCall.type === "function" ? toolCall.function.arguments : toolCall.custom.input;
 				renderer.render({ type: "tool_call", name: funcName, args: funcArgs });
+				sessionManager?.logEvent({ type: "tool_call", name: funcName, args: funcArgs });
 
 				try {
 					const result = await executeTool(funcName, funcArgs, signal);
 					renderer.render({ type: "tool_result", result, isError: false });
+					sessionManager?.logEvent({ type: "tool_result", result, isError: false });
 
 					// Add tool result to messages
 					const toolMsg = {
@@ -605,6 +610,7 @@ export async function callModelChat(
 					logMessage(toolMsg, `callChatModel:after_tool_${funcName}_success`);
 				} catch (e: any) {
 					renderer.render({ type: "tool_result", result: e.message, isError: true });
+					sessionManager?.logEvent({ type: "tool_result", result: e.message, isError: true });
 					const errorMsg = {
 						role: "tool",
 						tool_call_id: toolCall.id,
@@ -618,6 +624,7 @@ export async function callModelChat(
 		} else if (message.content) {
 			// Final assistant response
 			renderer.render({ type: "assistant_message", text: message.content });
+			sessionManager?.logEvent({ type: "assistant_message", text: message.content });
 			const finalMsg = { role: "assistant", content: message.content };
 			messages.push(finalMsg);
 			sessionManager?.logMessage(finalMsg);
@@ -669,6 +676,7 @@ export class Agent {
 	async chat(userMessage: string): Promise<void> {
 		// Render user message through the event system
 		this.renderer.render({ type: "user_message", text: userMessage });
+		this.sessionManager?.logEvent({ type: "user_message", text: userMessage });
 
 		// Add user message
 		const userMsg = { role: "user", content: userMessage };
