@@ -209,8 +209,12 @@ case "$VLLM_VERSION" in
         echo "Starting vLLM build (this WILL take 10-15 minutes)..."
         echo "Build will show detailed progress..."
         
-        # Use pip install with verbose output and no build isolation for better visibility
-        uv pip install -vv --no-build-isolation -e . 2>&1 | while IFS= read -r line; do
+        # Verify we're in the venv and packages are installed
+        echo "Python: $(which python)"
+        echo "Pip packages location: $(python -m pip show setuptools | grep Location || echo 'setuptools not found')"
+        
+        # Use pip install with verbose output
+        uv pip install -vv -e . 2>&1 | while IFS= read -r line; do
             # Filter out repetitive cmake progress lines but keep important info
             if [[ "$line" == *"error"* ]] || [[ "$line" == *"Error"* ]] || 
                [[ "$line" == *"WARNING"* ]] || [[ "$line" == *"Building"* ]] ||
