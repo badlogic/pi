@@ -170,11 +170,17 @@ Current working directory: ${process.cwd()}
 						await renderer.render({ type: "assistant_message", text: msg.content });
 					}
 				} else if (msg.role === "tool") {
-					// Tool result message
+					// Tool result message - detect if it was an error
+					const content = msg.content || "";
+					const isError =
+						content.includes("Command failed") ||
+						content.includes("Error:") ||
+						content.includes("error:") ||
+						content.includes("The operation was aborted");
 					await renderer.render({
 						type: "tool_result",
-						result: msg.content || "",
-						isError: false,
+						result: content,
+						isError,
 					});
 				} else if (msg.type === "reasoning") {
 					// Reasoning/thinking message (for GPT-OSS)
@@ -200,11 +206,17 @@ Current working directory: ${process.cwd()}
 						args: msg.arguments || "{}",
 					});
 				} else if (msg.type === "function_call_output") {
-					// Function output (for GPT-OSS)
+					// Function output (for GPT-OSS) - detect if it was an error
+					const output = msg.output || "";
+					const isError =
+						output.includes("Command failed") ||
+						output.includes("Error:") ||
+						output.includes("error:") ||
+						output.includes("The operation was aborted");
 					await renderer.render({
 						type: "tool_result",
-						result: msg.output || "",
-						isError: false,
+						result: output,
+						isError,
 					});
 				}
 			}
