@@ -185,10 +185,10 @@ case "$VLLM_VERSION" in
         echo "This will take 10-15 minutes..."
         echo "Build output will be verbose to show progress..."
         
-        # Install build dependencies
-        echo "Installing build dependencies..."
-        uv pip install ninja packaging setuptools setuptools-scm wheel -v || {
-            echo "ERROR: Failed to install build dependencies"
+        # Install basic build tools
+        echo "Installing basic build tools..."
+        uv pip install ninja wheel -v || {
+            echo "ERROR: Failed to install basic build tools"
             exit 1
         }
         
@@ -202,6 +202,24 @@ case "$VLLM_VERSION" in
         }
         cd vllm
         
+        # Use the existing PyTorch installation approach
+        echo "Configuring vLLM to use existing PyTorch installation..."
+        python use_existing_torch.py || {
+            echo "ERROR: Failed to configure existing PyTorch"
+            exit 1
+        }
+        
+        # Install build requirements
+        echo "Installing vLLM build requirements..."
+        if [ -f requirements/build.txt ]; then
+            uv pip install -r requirements/build.txt -v || {
+                echo "ERROR: Failed to install build requirements"
+                exit 1
+            }
+        else
+            echo "WARNING: requirements/build.txt not found, continuing anyway"
+        fi
+        
         # Set environment variables for verbose build
         export VERBOSE=1
         export CMAKE_VERBOSE_MAKEFILE=ON
@@ -211,10 +229,10 @@ case "$VLLM_VERSION" in
         
         # Verify we're in the venv and packages are installed
         echo "Python: $(which python)"
-        echo "Pip packages location: $(python -m pip show setuptools | grep Location || echo 'setuptools not found')"
+        echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'Not found')"
         
-        # Use pip install with verbose output
-        uv pip install -vv -e . 2>&1 | while IFS= read -r line; do
+        # Use pip install with --no-build-isolation as recommended for existing PyTorch
+        uv pip install -vv --no-build-isolation -e . 2>&1 | while IFS= read -r line; do
             # Filter out repetitive cmake progress lines but keep important info
             if [[ "$line" == *"error"* ]] || [[ "$line" == *"Error"* ]] || 
                [[ "$line" == *"WARNING"* ]] || [[ "$line" == *"Building"* ]] ||
