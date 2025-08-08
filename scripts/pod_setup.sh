@@ -176,29 +176,60 @@ case "$VLLM_VERSION" in
     source)
         echo "Installing PyTorch (stable) and building vLLM from source..."
         # Install stable PyTorch
-        uv pip install torch --torch-backend=auto || {
+        echo "Installing PyTorch with CUDA support..."
+        uv pip install torch --torch-backend=auto -v || {
             echo "ERROR: Failed to install PyTorch"
             exit 1
         }
         echo "Building vLLM from source (latest main branch)..."
         echo "This will take 10-15 minutes..."
+        echo "Build output will be verbose to show progress..."
+        
         # Install build dependencies
-        uv pip install ninja packaging setuptools || {
+        echo "Installing build dependencies..."
+        uv pip install ninja packaging setuptools wheel -v || {
             echo "ERROR: Failed to install build dependencies"
             exit 1
         }
+        
         # Clone and install from source
         cd /tmp
         rm -rf vllm
-        git clone https://github.com/vllm-project/vllm.git || {
+        echo "Cloning vLLM repository..."
+        git clone --depth 1 https://github.com/vllm-project/vllm.git || {
             echo "ERROR: Failed to clone vLLM repository"
             exit 1
         }
         cd vllm
-        uv pip install -e . || {
-            echo "ERROR: Failed to build vLLM from source"
+        
+        # Set environment variables for verbose build
+        export VERBOSE=1
+        export CMAKE_VERBOSE_MAKEFILE=ON
+        export MAX_JOBS=4  # Limit parallel jobs to avoid OOM
+        
+        echo "Starting vLLM build (this WILL take 10-15 minutes)..."
+        echo "Build will show detailed progress..."
+        
+        # Use pip install with verbose output and no build isolation for better visibility
+        uv pip install -vv --no-build-isolation -e . 2>&1 | while IFS= read -r line; do
+            # Filter out repetitive cmake progress lines but keep important info
+            if [[ "$line" == *"error"* ]] || [[ "$line" == *"Error"* ]] || 
+               [[ "$line" == *"WARNING"* ]] || [[ "$line" == *"Building"* ]] ||
+               [[ "$line" == *"Compiling"* ]] || [[ "$line" == *"Linking"* ]] ||
+               [[ "$line" == *"%"* ]] || [[ "$line" == *"Installing"* ]]; then
+                echo "$line"
+            fi
+        done
+        
+        # Check if install succeeded (pipe above always returns 0)
+        if ! python -c "import vllm" 2>/dev/null; then
+            echo "ERROR: vLLM build completed but import failed"
+            echo "Trying to show detailed error:"
+            python -c "import vllm"
             exit 1
-        }
+        fi
+        
+        echo "vLLM successfully built from source!"
         cd /
         ;;
     gpt-oss)
