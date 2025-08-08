@@ -5,9 +5,28 @@ import { glob } from "glob";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
 import { resolve } from "path";
+import { ConsoleRenderer } from "./renderers/console-renderer.js";
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Types
+// Event-based Architecture
+// ────────────────────────────────────────────────────────────────────────────────
+
+export type AgentEvent =
+	| { type: "assistant_start" }
+	| { type: "thinking"; text: string }
+	| { type: "tool_call"; name: string; args: string }
+	| { type: "tool_result"; result: string; isError: boolean }
+	| { type: "assistant_message"; text: string }
+	| { type: "error"; message: string }
+	| { type: "user_message"; text: string }
+	| { type: "conversation_end" };
+
+export interface AgentRenderer {
+	render(event: AgentEvent): void | Promise<void>;
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Configuration Types
 // ────────────────────────────────────────────────────────────────────────────────
 
 export interface AgentConfig {
@@ -24,10 +43,6 @@ export interface ToolCall {
 	id: string;
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Logging utilities
-// ────────────────────────────────────────────────────────────────────────────────
-
 function logMessages(messages: any[], context: string) {
 	const timestamp = new Date().toISOString();
 	const logEntry = {
@@ -35,12 +50,12 @@ function logMessages(messages: any[], context: string) {
 		context,
 		messages: JSON.parse(JSON.stringify(messages)), // Deep clone to avoid mutations
 	};
-	
+
 	try {
 		// Append to prompts.json (create if doesn't exist)
 		const logFile = "prompts.json";
 		let logs = [];
-		
+
 		if (existsSync(logFile)) {
 			try {
 				const content = readFileSync(logFile, "utf8");
@@ -50,14 +65,14 @@ function logMessages(messages: any[], context: string) {
 				logs = [];
 			}
 		}
-		
+
 		logs.push(logEntry);
-		
+
 		// Keep only last 100 entries to prevent file from growing too large
 		if (logs.length > 100) {
 			logs = logs.slice(-100);
 		}
-		
+
 		writeFileSync(logFile, JSON.stringify(logs, null, 2));
 	} catch (e) {
 		// Silently fail logging - don't interrupt the main flow
@@ -65,65 +80,23 @@ function logMessages(messages: any[], context: string) {
 	}
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Display utilities
-// ────────────────────────────────────────────────────────────────────────────────
-
+// Legacy display object for backward compatibility
+// TODO: Remove once all usages are migrated to renderer
 export const display = {
-	thinking: (text: string) => {
-		console.log(chalk.dim("[thinking]"));
-		console.log(chalk.dim(text));
-		console.log();
+	error: (text: string) => {
+		console.error(chalk.red(`[error] ${text}\n`));
 	},
-
-	tool: (name: string, args: string) => {
-		console.log(chalk.yellow(`[tool] ${name}(${args})`));
-	},
-
-	toolResult: (result: string, isError = false) => {
-		const lines = result.split("\n");
-		const maxLines = 10;
-		const truncated = lines.length > maxLines;
-		const toShow = truncated ? lines.slice(0, maxLines) : lines;
-
-		const text = toShow.join("\n");
-		console.log(isError ? chalk.red(text) : chalk.gray(text));
-
-		if (truncated) {
-			console.log(chalk.dim(`... (${lines.length - maxLines} more lines)`));
-		}
-		console.log();
-	},
-
-	assistantLabel: () => {
-		console.log(chalk.hex("#FFA500")("[assistant]"));
-	},
-
-	assistantMessage: (text: string) => {
-		console.log(text);
-		console.log();
-	},
-
 	user: (text?: string) => {
 		if (text) {
 			console.log(chalk.green("[user]"));
 			console.log(text);
-			console.log(); // Extra newline after user message
+			console.log();
 		} else {
-			// For interactive mode - just the label since text is already shown
 			console.log(chalk.green("[user]"));
 			console.log();
 		}
 	},
-
-	error: (text: string) => {
-		console.error(chalk.red(`[error] ${text}\n`));
-	},
 };
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Tools
-// ────────────────────────────────────────────────────────────────────────────────
 
 // For GPT-OSS models via responses API (vLLM format)
 export const toolsForResponses = [
@@ -303,13 +276,14 @@ export async function executeTool(name: string, args: string): Promise<string> {
 	}
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Model communication
-// ────────────────────────────────────────────────────────────────────────────────
-
-export async function callGptOssModel(client: OpenAI, model: string, messages: any[]): Promise<void> {
+export async function callGptOssModel(
+	client: OpenAI,
+	model: string,
+	messages: any[],
+	renderer: AgentRenderer,
+): Promise<void> {
 	// Show assistant label at the start
-	display.assistantLabel();
+	renderer.render({ type: "assistant_start" });
 
 	// Log initial messages
 	logMessages(messages, "callGptOssModel:initial");
@@ -337,9 +311,9 @@ export async function callGptOssModel(client: OpenAI, model: string, messages: a
 
 		const executeToolCall = async (toolCall: ToolCall) => {
 			try {
-				display.tool(toolCall.name, toolCall.arguments);
+				renderer.render({ type: "tool_call", name: toolCall.name, args: toolCall.arguments });
 				const result = await executeTool(toolCall.name, toolCall.arguments);
-				display.toolResult(result);
+				renderer.render({ type: "tool_result", result, isError: false });
 
 				// Add tool result to messages
 				messages.push({
@@ -349,7 +323,7 @@ export async function callGptOssModel(client: OpenAI, model: string, messages: a
 				} as ResponseFunctionToolCallOutputItem);
 				logMessages(messages, `callGptOssModel:after_tool_${toolCall.name}_success`);
 			} catch (e: any) {
-				display.toolResult(e.message, true);
+				renderer.render({ type: "tool_result", result: e.message, isError: true });
 				messages.push({
 					type: "function_call_output",
 					call_id: toolCall.id,
@@ -374,7 +348,7 @@ export async function callGptOssModel(client: OpenAI, model: string, messages: a
 				case "reasoning": {
 					for (const content of item.content || []) {
 						if (content.type === "reasoning_text") {
-							display.thinking(content.text);
+							renderer.render({ type: "thinking", text: content.text });
 						}
 					}
 					break;
@@ -383,9 +357,9 @@ export async function callGptOssModel(client: OpenAI, model: string, messages: a
 				case "message": {
 					for (const content of item.content || []) {
 						if (content.type === "output_text") {
-							display.assistantMessage(content.text);
+							renderer.render({ type: "assistant_message", text: content.text });
 						} else if (content.type === "refusal") {
-							display.error(`Refusal: ${content.refusal}`);
+							renderer.render({ type: "error", message: `Refusal: ${content.refusal}` });
 						}
 						conversationDone = true;
 					}
@@ -403,7 +377,7 @@ export async function callGptOssModel(client: OpenAI, model: string, messages: a
 				}
 
 				default: {
-					display.error(`Unknown output type in LLM response: ${item.type}`);
+					renderer.render({ type: "error", message: `Unknown output type in LLM response: ${item.type}` });
 					break;
 				}
 			}
@@ -411,13 +385,18 @@ export async function callGptOssModel(client: OpenAI, model: string, messages: a
 	}
 
 	if (!conversationDone) {
-		display.error("Max rounds reached without completion");
+		renderer.render({ type: "error", message: "Max rounds reached without completion" });
 	}
 }
 
-export async function callChatModel(client: OpenAI, model: string, messages: any[]): Promise<void> {
+export async function callChatModel(
+	client: OpenAI,
+	model: string,
+	messages: any[],
+	renderer: AgentRenderer,
+): Promise<void> {
 	// Show assistant label at the start
-	display.assistantLabel();
+	renderer.render({ type: "assistant_start" });
 
 	// Log initial messages
 	logMessages(messages, "callChatModel:initial");
@@ -454,11 +433,11 @@ export async function callChatModel(client: OpenAI, model: string, messages: any
 			for (const toolCall of message.tool_calls) {
 				const funcName = toolCall.type === "function" ? toolCall.function.name : toolCall.custom.name;
 				const funcArgs = toolCall.type === "function" ? toolCall.function.arguments : toolCall.custom.input;
-				display.tool(funcName, funcArgs);
+				renderer.render({ type: "tool_call", name: funcName, args: funcArgs });
 
 				try {
 					const result = await executeTool(funcName, funcArgs);
-					display.toolResult(result);
+					renderer.render({ type: "tool_result", result, isError: false });
 
 					// Add tool result to messages
 					messages.push({
@@ -468,7 +447,7 @@ export async function callChatModel(client: OpenAI, model: string, messages: any
 					});
 					logMessages(messages, `callChatModel:after_tool_${funcName}_success`);
 				} catch (e: any) {
-					display.toolResult(e.message, true);
+					renderer.render({ type: "tool_result", result: e.message, isError: true });
 					messages.push({
 						role: "tool",
 						tool_call_id: toolCall.id,
@@ -479,7 +458,7 @@ export async function callChatModel(client: OpenAI, model: string, messages: any
 			}
 		} else if (message.content) {
 			// Final assistant response
-			display.assistantMessage(message.content);
+			renderer.render({ type: "assistant_message", text: message.content });
 			messages.push({ role: "assistant", content: message.content });
 			logMessages(messages, `callChatModel:pushed_final_assistant_response`);
 			assistantResponded = true;
@@ -487,7 +466,7 @@ export async function callChatModel(client: OpenAI, model: string, messages: any
 	}
 
 	if (!assistantResponded) {
-		display.error("Max rounds reached without response");
+		renderer.render({ type: "error", message: "Max rounds reached without response" });
 	}
 }
 
@@ -499,13 +478,17 @@ export class Agent {
 	private client: OpenAI;
 	private config: AgentConfig;
 	private messages: any[] = [];
+	private renderer: AgentRenderer;
 
-	constructor(config: AgentConfig) {
+	constructor(config: AgentConfig, renderer?: AgentRenderer) {
 		this.config = config;
 		this.client = new OpenAI({
 			apiKey: config.apiKey,
 			baseURL: config.baseURL,
 		});
+
+		// Use provided renderer or default to console
+		this.renderer = renderer || new ConsoleRenderer();
 
 		// Initialize with system prompt if provided
 		if (config.systemPrompt) {
@@ -520,12 +503,12 @@ export class Agent {
 
 		try {
 			if (this.config.isGptOss) {
-				await callGptOssModel(this.client, this.config.model, this.messages);
+				await callGptOssModel(this.client, this.config.model, this.messages, this.renderer);
 			} else {
-				await callChatModel(this.client, this.config.model, this.messages);
+				await callChatModel(this.client, this.config.model, this.messages, this.renderer);
 			}
 		} catch (e: any) {
-			logMessages(this.messages, `agent:error_${e.status || 'unknown'}`);
+			logMessages(this.messages, `agent:error_${e.status || "unknown"}`);
 			throw e;
 		}
 	}
@@ -536,8 +519,6 @@ export class Agent {
 
 	clearMessages(): void {
 		// Keep system prompt if it exists
-		this.messages = this.config.systemPrompt 
-			? [{ role: "system", content: this.config.systemPrompt }]
-			: [];
+		this.messages = this.config.systemPrompt ? [{ role: "system", content: this.config.systemPrompt }] : [];
 	}
 }

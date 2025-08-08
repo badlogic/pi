@@ -1,8 +1,10 @@
-import { tool } from "ai";
 import chalk from "chalk";
 import * as readline from "readline/promises";
 import { getActivePod, loadConfig } from "../config.js";
+import type { AgentRenderer } from "./agent.js";
 import { Agent, display } from "./agent.js";
+import { ConsoleRenderer } from "./renderers/console-renderer.js";
+import { TuiRenderer } from "./renderers/tui-renderer.js";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Types
@@ -12,6 +14,7 @@ interface PromptOptions {
 	pod?: string;
 	interactive?: boolean;
 	apiKey?: string;
+	ui?: "console" | "tui";
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -56,55 +59,93 @@ Do not output markdown tables as part of your responses.
 
 Keep your respones concise and relevant to the user's request.
 
+File paths you output must include line numbers where possible, e.g. "src/index.ts:10-20" for lines 10 to 20 in src/index.ts.
+
 Current working directory: ${process.cwd()}
 `;
 
+	// Create renderer based on UI option
+	let renderer: AgentRenderer;
+	let tuiRenderer: TuiRenderer | null = null; // Store TUI renderer for cleanup
+
+	if (opts.ui === "tui" && opts.interactive) {
+		tuiRenderer = new TuiRenderer();
+		renderer = tuiRenderer;
+	} else {
+		renderer = new ConsoleRenderer();
+	}
+
 	// Create agent
-	const agent = new Agent({
-		apiKey,
-		baseURL: `http://${host}:${modelConfig.port}/v1`,
-		model: modelConfig.model,
-		isGptOss,
-		systemPrompt,
-	});
+	const agent = new Agent(
+		{
+			apiKey,
+			baseURL: `http://${host}:${modelConfig.port}/v1`,
+			model: modelConfig.model,
+			isGptOss,
+			systemPrompt,
+		},
+		renderer,
+	);
 
 	// Interactive mode
 	if (opts.interactive) {
-		const rl = readline.createInterface({
-			input: process.stdin,
-			output: process.stdout,
-		});
+		if (tuiRenderer) {
+			// TUI mode - use TUI for input
+			await tuiRenderer.init();
 
-		console.log(chalk.gray("Interactive mode. CTRL + C to quit.\n"));
+			// Handle Ctrl+C
+			process.on("SIGINT", () => {
+				tuiRenderer.stop();
+				process.exit(0);
+			});
 
-		while (true) {
-			console.log(chalk.green("[user]"));
-			let userInput = await rl.question(`${chalk.green("> ")}`);
+			while (true) {
+				const userInput = await tuiRenderer.getUserInput();
 
-			// Check for multiline input marker
-			if (userInput === '"""' || userInput.startsWith('"""')) {
-				const lines = [];
-				if (userInput.startsWith('"""') && userInput.length > 3) {
-					// Handle case where user types """some text
-					lines.push(userInput.substring(3));
+				try {
+					await agent.chat(userInput);
+				} catch (e: any) {
+					renderer.render({ type: "error", message: e.message });
 				}
-
-				console.log(chalk.dim('(multiline mode - type """ on its own line to finish)'));
-
-				while (true) {
-					const line = await rl.question(chalk.green("| "));
-					if (line === '"""') break;
-					lines.push(line);
-				}
-				userInput = lines.join("\n");
 			}
+		} else {
+			// Console mode - use readline
+			const rl = readline.createInterface({
+				input: process.stdin,
+				output: process.stdout,
+			});
 
-			console.log();
+			console.log(chalk.gray("Interactive mode. CTRL + C to quit.\n"));
 
-			try {
-				await agent.chat(userInput);
-			} catch (e: any) {
-				display.error(e.message);
+			while (true) {
+				console.log(chalk.green("[user]"));
+				let userInput = await rl.question(`${chalk.green("> ")}`);
+
+				// Check for multiline input marker
+				if (userInput === '"""' || userInput.startsWith('"""')) {
+					const lines = [];
+					if (userInput.startsWith('"""') && userInput.length > 3) {
+						// Handle case where user types """some text
+						lines.push(userInput.substring(3));
+					}
+
+					console.log(chalk.dim('(multiline mode - type """ on its own line to finish)'));
+
+					while (true) {
+						const line = await rl.question(chalk.green("| "));
+						if (line === '"""') break;
+						lines.push(line);
+					}
+					userInput = lines.join("\n");
+				}
+
+				console.log();
+
+				try {
+					await agent.chat(userInput);
+				} catch (e: any) {
+					display.error(e.message);
+				}
 			}
 		}
 	} else {
@@ -122,7 +163,7 @@ Current working directory: ${process.cwd()}
 			}
 
 			// Display user message for single-shot mode
-			display.user(userMessage);
+			renderer.render({ type: "user_message", text: userMessage });
 
 			try {
 				await agent.chat(userMessage);

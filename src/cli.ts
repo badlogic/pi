@@ -303,20 +303,30 @@ try {
 				break;
 			}
 			case "prompt": {
-				// pi prompt <name> ["<message>"] [-i|--interactive]
+				// pi prompt <name> ["<message>"] [-i|--interactive] [--ui <console|tui>]
 				const name = args[1];
 				if (!name) {
-					console.error('Usage: pi prompt <name> ["<message>"] [-i|--interactive]');
+					console.error('Usage: pi prompt <name> ["<message>"] [-i|--interactive] [--ui <console|tui>]');
 					process.exit(1);
 				}
 
 				const interactive = args.includes("-i") || args.includes("--interactive");
 				const apiKey = process.env.VLLM_API_KEY;
 
+				// Parse UI option
+				let ui: "console" | "tui" = "console";
+				const uiIndex = args.indexOf("--ui");
+				if (uiIndex !== -1 && uiIndex + 1 < args.length) {
+					const uiValue = args[uiIndex + 1];
+					if (uiValue === "tui" || uiValue === "console") {
+						ui = uiValue;
+					}
+				}
+
 				// Collect all messages (skip model name and flags)
 				const messages: string[] = [];
 				for (let i = 2; i < args.length; i++) {
-					if (!args[i].startsWith("-")) {
+					if (!args[i].startsWith("-") && i !== uiIndex + 1) {
 						messages.push(args[i]);
 					}
 				}
@@ -330,6 +340,7 @@ try {
 					pod: podOverride,
 					interactive,
 					apiKey,
+					ui,
 				}).catch(() => {
 					// Error already handled in promptModel, just exit cleanly
 					process.exit(0);
