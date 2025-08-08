@@ -15,14 +15,14 @@ npm install -g @mariozechner/pi
 - Configures tool calling for agentic models (Qwen, GPT-OSS, GLM, etc.)
 - Manages multiple models on the same pod with "smart" GPU allocation
 - Provides OpenAI-compatible API endpoints for each model
-- Includes an interactive chat with file system tools for testing
+- Includes an interactive agent with file system tools for testing
 
 ## Quick Start
 
 ```bash
 # Set required environment variables
 export HF_TOKEN=your_huggingface_token      # Get from https://huggingface.co/settings/tokens
-export PI_API_KEY=your_api_key           # Any string you want for API authentication
+export PI_API_KEY=your_api_key              # Any string you want for API authentication
 
 # Setup a DataCrunch pod with NFS storage (models path auto-extracted)
 pi pods setup dc1 "ssh root@1.2.3.4" \
@@ -31,10 +31,13 @@ pi pods setup dc1 "ssh root@1.2.3.4" \
 # Start a model (automatic configuration for known models)
 pi start Qwen/Qwen2.5-Coder-32B-Instruct --name qwen
 
-# Test with interactive chat (includes file tools)
-pi prompt qwen -i
+# Chat with the model using the agent
+pi agent qwen "What is the Fibonacci sequence?"
 
-# Or use with any OpenAI-compatible client
+# Or interactive mode with file system tools
+pi agent qwen -i
+
+# Use with any OpenAI-compatible client
 export OPENAI_BASE_URL='http://1.2.3.4:8001/v1'
 export OPENAI_API_KEY=$PI_API_KEY
 ```
@@ -109,16 +112,21 @@ pi list                   # List running models with status
 pi logs <name>            # Stream model logs (tail -f)
 ```
 
-### Testing & Interaction
+### Agent & Chat Interface
 
 ```bash
-pi prompt <name> "<message>"              # Single prompt
-pi prompt <name> "<msg1>" "<msg2>"        # Multiple prompts in sequence
-pi prompt <name> -i                       # Interactive chat mode
-pi prompt <name> -i -c                    # Continue previous session
+pi agent <name> "<message>"               # Single message to model
+pi agent <name> "<msg1>" "<msg2>"         # Multiple messages in sequence
+pi agent <name> -i                        # Interactive chat mode
+pi agent <name> -i -c                     # Continue previous session
+
+# Standalone OpenAI-compatible agent (works with any API)
+pi-agent --base-url http://localhost:8000/v1 --model llama-3.1 "Hello"
+pi-agent --api-key sk-... "What is 2+2?"  # Uses OpenAI by default
+pi-agent -i                                # Interactive mode
 ```
 
-Interactive mode includes tools for file operations (read, list, bash, glob, rg) to test agentic capabilities.
+The agent includes tools for file operations (read, list, bash, glob, rg) to test agentic capabilities, particularly useful for code navigation and analysis tasks.
 
 ## Predefined Model Configurations
 
@@ -270,7 +278,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://your-pod-ip:8001/v1",
-    api_key="your-vllm-api-key"
+    api_key="your-pi-api-key"
 )
 
 # Chat completion with tool calling
@@ -297,13 +305,50 @@ response = client.chat.completions.create(
 )
 ```
 
+## Standalone Agent CLI
+
+`pi` includes a standalone OpenAI-compatible agent that can work with any API:
+
+```bash
+# Install globally to get pi-agent command
+npm install -g @mariozechner/pi
+
+# Use with OpenAI
+pi-agent --api-key sk-... "What is machine learning?"
+
+# Use with local vLLM
+pi-agent --base-url http://localhost:8000/v1 \
+         --model meta-llama/Llama-3.1-8B-Instruct \
+         --api-key dummy \
+         "Explain quantum computing"
+
+# Interactive mode
+pi-agent -i
+
+# Continue previous session
+pi-agent --continue "Follow up question"
+
+# Custom system prompt
+pi-agent --system-prompt "You are a Python expert" "Write a web scraper"
+
+# Use responses API (for GPT-OSS models)
+pi-agent --api responses --model openai/gpt-oss-20b "Hello"
+```
+
+The agent supports:
+- Session persistence across conversations
+- Interactive TUI mode with syntax highlighting
+- File system tools (read, list, bash, glob, rg) for code navigation
+- Both Chat Completions and Responses API formats
+- Custom system prompts
+
 ## Tool Calling Support
 
 `pi` automatically configures appropriate tool calling parsers for known models:
 
 - **Qwen models**: `hermes` parser (Qwen3-Coder uses `qwen3_coder`)
 - **GLM models**: `glm4_moe` parser with reasoning support
-- **GPT-OSS models**: Uses `/v1/responses` endpoint, as tool calling (functino calling in OpenAI parlance) is currently a [WIP with the `v1/chat/completions` endpoint](https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html#tool-use).
+- **GPT-OSS models**: Uses `/v1/responses` endpoint, as tool calling (function calling in OpenAI parlance) is currently a [WIP with the `v1/chat/completions` endpoint](https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html#tool-use).
 - **Custom models**: Specify with `--vllm --tool-call-parser <parser> --enable-auto-tool-choice`
 
 To disable tool calling:
@@ -336,17 +381,29 @@ pi start Qwen/Qwen2.5-Coder-32B-Instruct --name coder \
 
 ## Session Persistence
 
-The interactive prompt mode (`-i`) saves sessions for each project directory:
+The interactive agent mode (`-i`) saves sessions for each project directory:
 
 ```bash
 # Start new session
-pi prompt qwen -i
+pi agent qwen -i
 
 # Continue previous session (maintains chat history)
-pi prompt qwen -i -c
+pi agent qwen -i -c
 ```
 
-Sessions are stored in `~/.pi/sessions/` organized by project path.
+Sessions are stored in `~/.pi/sessions/` organized by project path and include:
+- Complete conversation history
+- Tool call results
+- Token usage statistics
+
+## Architecture & Event System
+
+The agent uses a unified event-based architecture where all interactions flow through `AgentEvent` types. This enables:
+- Consistent UI rendering across console and TUI modes
+- Session recording and replay
+- Clean separation between API calls and UI updates
+
+Events are automatically converted to the appropriate API format (Chat Completions or Responses) based on the model type.
 
 ## Troubleshooting
 
@@ -380,6 +437,16 @@ If using `--vllm nightly` fails, try:
 - Use `--vllm release` for stable version
 - Check CUDA compatibility with `pi ssh "nvidia-smi"`
 
+### Agent Not Finding Messages
+If the agent shows configuration instead of your message, ensure quotes around messages with special characters:
+```bash
+# Good
+pi agent qwen "What is this file about?"
+
+# Bad (shell might interpret special chars)
+pi agent qwen What is this file about?
+```
+
 ## Advanced Usage
 
 ### Working with Multiple Pods
@@ -410,7 +477,17 @@ pi ssh "du -sh ~/.cache/huggingface/hub/*"
 
 # View all logs
 pi ssh "ls -la ~/.vllm_logs/"
+
+# Check agent session history
+ls -la ~/.pi/sessions/
 ```
+
+## Environment Variables
+
+- `HF_TOKEN` - HuggingFace token for model downloads
+- `PI_API_KEY` - API key for vLLM endpoints
+- `PI_CONFIG_DIR` - Config directory (default: `~/.pi`)
+- `OPENAI_API_KEY` - Used by `pi-agent` when no `--api-key` provided
 
 ## License
 
