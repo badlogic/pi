@@ -6,7 +6,7 @@ set -euo pipefail
 MOUNT_COMMAND=""
 MODELS_PATH=""
 HF_TOKEN=""
-VLLM_API_KEY=""
+PI_API_KEY=""
 VLLM_VERSION="release"  # Default to release
 
 while [[ $# -gt 0 ]]; do
@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --vllm-api-key)
-            VLLM_API_KEY="$2"
+            PI_API_KEY="$2"
             shift 2
             ;;
         --vllm)
@@ -44,8 +44,8 @@ if [ -z "$HF_TOKEN" ]; then
     exit 1
 fi
 
-if [ -z "$VLLM_API_KEY" ]; then
-    echo "ERROR: VLLM_API_KEY is required" >&2
+if [ -z "$PI_API_KEY" ]; then
+    echo "ERROR: PI_API_KEY is required" >&2
     exit 1
 fi
 
@@ -77,13 +77,13 @@ fi
 # Install CUDA toolkit matching driver version if needed
 if [[ "$NVCC_VERSION" != "$DRIVER_CUDA_VERSION" ]]; then
     echo "Installing CUDA Toolkit $DRIVER_CUDA_VERSION to match driver..."
-    
+
     # Detect Ubuntu version
     UBUNTU_VERSION=$(lsb_release -rs)
     UBUNTU_CODENAME=$(lsb_release -cs)
-    
+
     echo "Detected Ubuntu $UBUNTU_VERSION ($UBUNTU_CODENAME)"
-    
+
     # Map Ubuntu version to NVIDIA repo path
     if [[ "$UBUNTU_VERSION" == "24.04" ]]; then
         REPO_PATH="ubuntu2404"
@@ -95,23 +95,23 @@ if [[ "$NVCC_VERSION" != "$DRIVER_CUDA_VERSION" ]]; then
         echo "Warning: Unsupported Ubuntu version $UBUNTU_VERSION, trying ubuntu2204"
         REPO_PATH="ubuntu2204"
     fi
-    
+
     # Add NVIDIA package repositories
     wget https://developer.download.nvidia.com/compute/cuda/repos/${REPO_PATH}/x86_64/cuda-keyring_1.1-1_all.deb
     dpkg -i cuda-keyring_1.1-1_all.deb
     rm cuda-keyring_1.1-1_all.deb
     apt-get update
-    
+
     # Install specific CUDA toolkit version
     # Convert version format (12.9 -> 12-9)
     CUDA_VERSION_APT=$(echo $DRIVER_CUDA_VERSION | sed 's/\./-/')
     echo "Installing cuda-toolkit-${CUDA_VERSION_APT}..."
     apt-get install -y cuda-toolkit-${CUDA_VERSION_APT}
-    
+
     # Add CUDA to PATH
     export PATH=/usr/local/cuda-${DRIVER_CUDA_VERSION}/bin:$PATH
     export LD_LIBRARY_PATH=/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:${LD_LIBRARY_PATH:-}
-    
+
     # Verify installation
     nvcc --version
 else
@@ -172,7 +172,7 @@ case "$VLLM_VERSION" in
     nightly)
         echo "Installing vLLM nightly with PyTorch..."
         echo "This will install the latest nightly build of vLLM..."
-        
+
         # Install vLLM nightly with PyTorch
         uv pip install -U vllm \
             --torch-backend=auto \
@@ -180,18 +180,18 @@ case "$VLLM_VERSION" in
             echo "ERROR: Failed to install vLLM nightly"
             exit 1
         }
-        
+
         echo "vLLM nightly successfully installed!"
         ;;
     gpt-oss)
         echo "Installing GPT-OSS special build with PyTorch nightly..."
         echo "WARNING: This build is ONLY for GPT-OSS models!"
         echo "Installing PyTorch nightly and cutting-edge dependencies..."
-        
+
         # Convert CUDA version format for PyTorch (12.4 -> cu124)
         PYTORCH_CUDA="cu$(echo $DRIVER_CUDA_VERSION | sed 's/\.//')"
         echo "Using PyTorch nightly with ${PYTORCH_CUDA} (driver supports ${DRIVER_CUDA_VERSION})"
-        
+
         # The GPT-OSS build will pull PyTorch nightly and other dependencies
         # via the extra index URLs. We don't pre-install torch here to avoid conflicts.
         uv pip install --pre vllm==0.10.1+gptoss \
@@ -202,7 +202,7 @@ case "$VLLM_VERSION" in
             echo "This automatically installs PyTorch nightly with ${PYTORCH_CUDA}, Triton nightly, and other dependencies"
             exit 1
         }
-        
+
         # Install gpt-oss library for tool support
         uv pip install gpt-oss || {
             echo "WARNING: Failed to install gpt-oss library (needed for tool use)"
@@ -229,15 +229,15 @@ fi
 # --- Mount storage if provided -----------------------------------------------
 if [ -n "$MOUNT_COMMAND" ]; then
     echo "Setting up mount..."
-    
+
     # Create mount point directory if it doesn't exist
     mkdir -p "$MODELS_PATH"
-    
+
     # Execute the mount command
     eval "$MOUNT_COMMAND" || {
         echo "WARNING: Mount command failed, continuing without mount"
     }
-    
+
     # Verify mount succeeded (optional, may not always be a mount point)
     if mountpoint -q "$MODELS_PATH" 2>/dev/null; then
         echo "Storage successfully mounted at $MODELS_PATH"
@@ -282,7 +282,7 @@ echo "Created symlink: ~/.cache/huggingface -> ${MODELS_PATH}/huggingface"
 # Verify the symlink works
 if [ -d ~/.cache/huggingface/hub ]; then
     echo "✓ Model storage configured successfully"
-    
+
     # Check available space
     AVAILABLE_SPACE=$(df -h "$MODELS_PATH" | awk 'NR==2 {print $4}')
     echo "Available space: $AVAILABLE_SPACE"
@@ -304,7 +304,7 @@ cat >> ~/.bashrc << EOF
 export PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/bin:\$HOME/.local/bin:\$PATH"
 export LD_LIBRARY_PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:\${LD_LIBRARY_PATH:-}"
 export HF_TOKEN="${HF_TOKEN}"
-export VLLM_API_KEY="${VLLM_API_KEY}"
+export PI_API_KEY="${PI_API_KEY}"
 export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN}"
 export HF_HUB_ENABLE_HF_TRANSFER=1
 export VLLM_NO_USAGE_STATS=1

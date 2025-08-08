@@ -516,8 +516,28 @@ Examples:
 		}
 	}
 
-	// Get message from remaining args
-	const message = args.filter((arg) => !arg.startsWith("--")).join(" ");
+	// Get message from remaining args (skip flags and their values)
+	const messages: string[] = [];
+	let skipNext = false;
+	for (let i = 0; i < args.length; i++) {
+		if (skipNext) {
+			skipNext = false;
+			continue;
+		}
+		if (args[i].startsWith("--")) {
+			// Check if this flag takes a value
+			const flag = args[i];
+			if (flag === "--continue" || flag === "--help" || flag === "-h") {
+			} else {
+				// All other flags take a value, skip the next arg
+				skipNext = true;
+			}
+		} else {
+			// This is a message argument
+			messages.push(args[i]);
+		}
+	}
+	const message = messages.join(" ");
 
 	if (!apiKey) {
 		throw new Error("API key required (use --api-key or set OPENAI_API_KEY)");

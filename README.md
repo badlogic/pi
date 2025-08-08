@@ -22,7 +22,7 @@ npm install -g @mariozechner/pi
 ```bash
 # Set required environment variables
 export HF_TOKEN=your_huggingface_token      # Get from https://huggingface.co/settings/tokens
-export VLLM_API_KEY=your_api_key           # Any string you want for API authentication
+export PI_API_KEY=your_api_key           # Any string you want for API authentication
 
 # Setup a DataCrunch pod with NFS storage (models path auto-extracted)
 pi pods setup dc1 "ssh root@1.2.3.4" \
@@ -36,7 +36,7 @@ pi prompt qwen -i
 
 # Or use with any OpenAI-compatible client
 export OPENAI_BASE_URL='http://1.2.3.4:8001/v1'
-export OPENAI_API_KEY=$VLLM_API_KEY
+export OPENAI_API_KEY=$PI_API_KEY
 ```
 
 ## Prerequisites

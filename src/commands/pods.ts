@@ -48,7 +48,7 @@ export const setupPod = async (
 ) => {
 	// Validate environment variables
 	const hfToken = process.env.HF_TOKEN;
-	const vllmApiKey = process.env.VLLM_API_KEY;
+	const vllmApiKey = process.env.PI_API_KEY;
 
 	if (!hfToken) {
 		console.error(chalk.red("ERROR: HF_TOKEN environment variable is required"));
@@ -58,8 +58,8 @@ export const setupPod = async (
 	}
 
 	if (!vllmApiKey) {
-		console.error(chalk.red("ERROR: VLLM_API_KEY environment variable is required"));
-		console.error("Set an API key: export VLLM_API_KEY=your_api_key_here");
+		console.error(chalk.red("ERROR: PI_API_KEY environment variable is required"));
+		console.error("Set an API key: export PI_API_KEY=your_api_key_here");
 		process.exit(1);
 	}
 

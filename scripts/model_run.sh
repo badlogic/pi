@@ -52,7 +52,7 @@ echo "✅ Model download complete"
 echo ""
 
 # Build vLLM command
-VLLM_CMD="vllm serve '$MODEL_ID' --port $PORT --api-key '$VLLM_API_KEY'"
+VLLM_CMD="vllm serve '$MODEL_ID' --port $PORT --api-key '$PI_API_KEY'"
 if [ -n "$VLLM_ARGS" ]; then
     VLLM_CMD="$VLLM_CMD $VLLM_ARGS"
 fi

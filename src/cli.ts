@@ -42,10 +42,10 @@ Model Management:
   pi agent <name> "<message>" [--thinking]          Chat with model using agent & tools
 
   All model commands support --pod <name> to override the active pod.
-  
+
 Environment:
   HF_TOKEN         HuggingFace token for model downloads
-  VLLM_API_KEY     API key for vLLM endpoints
+  PI_API_KEY     API key for vLLM endpoints
   PI_CONFIG_DIR    Config directory (default: ~/.pi)`);
 }
 
@@ -333,7 +333,7 @@ try {
 
 				const interactive = args.includes("-i") || args.includes("--interactive");
 				const continueSession = args.includes("-c") || args.includes("--continue");
-				const apiKey = process.env.VLLM_API_KEY;
+				const apiKey = process.env.PI_API_KEY;
 
 				// Collect all messages (skip model name and flags)
 				const messages: string[] = [];

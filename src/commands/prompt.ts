@@ -63,7 +63,7 @@ Current working directory: ${process.cwd()}`;
 		"--model",
 		modelConfig.model,
 		"--api-key",
-		opts.apiKey || process.env.VLLM_API_KEY || "dummy",
+		opts.apiKey || process.env.PI_API_KEY || "dummy",
 		"--api",
 		modelConfig.model.toLowerCase().includes("gpt-oss") ? "responses" : "completions",
 		"--system-prompt",
