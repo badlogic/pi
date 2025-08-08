@@ -1,7 +1,8 @@
 import { randomBytes } from "crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
+import type { AgentEvent } from "./agent";
 
 // Simple UUID v4 generator
 function uuidv4(): string {
@@ -13,25 +14,30 @@ function uuidv4(): string {
 }
 
 export interface SessionConfig {
-	model: string;
 	baseURL: string;
-	isGptOss: boolean;
-	apiKey?: string;
-	systemPrompt?: string;
+	model: string;
+	api: "chat completions" | "responses";
+	systemPrompt: string;
 }
 
-export interface TokenUsage {
-	prompt_tokens: number;
-	completion_tokens: number;
-	total_tokens: number;
-	cache_read_tokens?: number;
-	cache_write_tokens?: number;
+export interface SessionHeader {
+	type: "session";
+	id: string;
+	timestamp: string;
+	cwd: string;
+	config: SessionConfig;
+}
+
+export interface SessionEvent {
+	type: "event";
+	timestamp: string;
+	agentEvent: AgentEvent;
 }
 
 export interface SessionData {
 	config: SessionConfig;
-	messages: any[];
-	totalUsage: TokenUsage;
+	events: SessionEvent[];
+	totalUsage: Extract<AgentEvent, { type: "token_usage" }>;
 }
 
 export class SessionManager {
@@ -43,7 +49,7 @@ export class SessionManager {
 		this.sessionDir = this.getSessionDirectory();
 
 		if (continueSession) {
-			const mostRecent = this.findMostRecentSession();
+			const mostRecent = this.findMostRecentlyModifiedSession();
 			if (mostRecent) {
 				this.sessionFile = mostRecent;
 				// Load session ID from file
@@ -59,24 +65,26 @@ export class SessionManager {
 
 	private getSessionDirectory(): string {
 		const cwd = process.cwd();
-		// Replace slashes with dashes, prepend with --
-		const safePath = "--" + cwd.replace(/^\//, "").replace(/\//g, "-");
+		const safePath = "--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--";
 
-		const sessionDir = join(homedir(), ".pi", "sessions", safePath);
-		mkdirSync(sessionDir, { recursive: true });
+		const piConfigDir = resolve(process.env.PI_CONFIG_DIR || join(homedir(), ".pi"));
+		const sessionDir = join(piConfigDir, "sessions", safePath);
+		if (!existsSync(sessionDir)) {
+			mkdirSync(sessionDir, { recursive: true });
+		}
 		return sessionDir;
 	}
 
 	private initNewSession(): void {
 		this.sessionId = uuidv4();
 		const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-		this.sessionFile = join(this.sessionDir, `session_${this.sessionId}_${timestamp}.jsonl`);
+		this.sessionFile = join(this.sessionDir, `${timestamp}_${this.sessionId}.jsonl`);
 	}
 
-	private findMostRecentSession(): string | null {
+	private findMostRecentlyModifiedSession(): string | null {
 		try {
 			const files = readdirSync(this.sessionDir)
-				.filter((f) => f.startsWith("session_") && f.endsWith(".jsonl"))
+				.filter((f) => f.endsWith(".jsonl"))
 				.map((f) => ({
 					name: f,
 					path: join(this.sessionDir, f),
@@ -91,6 +99,7 @@ export class SessionManager {
 	}
 
 	private loadSessionId(): void {
+		// TODO this whole function looks very broken
 		if (!existsSync(this.sessionFile)) return;
 
 		const lines = readFileSync(this.sessionFile, "utf8").trim().split("\n");
@@ -109,46 +118,22 @@ export class SessionManager {
 		this.sessionId = uuidv4();
 	}
 
-	logSession(config: SessionConfig): void {
-		const entry = {
+	startSession(config: SessionConfig): void {
+		const entry: SessionHeader = {
 			type: "session",
 			id: this.sessionId,
 			timestamp: new Date().toISOString(),
 			cwd: process.cwd(),
-			config: {
-				model: config.model,
-				baseURL: config.baseURL,
-				isGptOss: config.isGptOss,
-				systemPrompt: config.systemPrompt,
-				// Don't log API key
-			},
+			config,
 		};
 		appendFileSync(this.sessionFile, JSON.stringify(entry) + "\n");
 	}
 
-	logMessage(message: any): void {
-		const entry = {
-			type: "message",
-			timestamp: new Date().toISOString(),
-			data: message,
-		};
-		appendFileSync(this.sessionFile, JSON.stringify(entry) + "\n");
-	}
-
-	logUsage(usage: TokenUsage): void {
-		const entry = {
-			type: "usage",
-			timestamp: new Date().toISOString(),
-			data: usage,
-		};
-		appendFileSync(this.sessionFile, JSON.stringify(entry) + "\n");
-	}
-
-	logEvent(event: { type: string; [key: string]: any }): void {
-		const entry = {
+	on(event: AgentEvent): void {
+		const entry: SessionEvent = {
 			type: "event",
 			timestamp: new Date().toISOString(),
-			data: event,
+			agentEvent: event,
 		};
 		appendFileSync(this.sessionFile, JSON.stringify(entry) + "\n");
 	}
@@ -158,13 +143,14 @@ export class SessionManager {
 
 		const lines = readFileSync(this.sessionFile, "utf8").trim().split("\n");
 		let config: SessionConfig | null = null;
-		const messages: any[] = [];
-		const totalUsage: TokenUsage = {
-			prompt_tokens: 0,
-			completion_tokens: 0,
-			total_tokens: 0,
-			cache_read_tokens: 0,
-			cache_write_tokens: 0,
+		const events: SessionEvent[] = [];
+		let totalUsage: Extract<AgentEvent, { type: "token_usage" }> = {
+			type: "token_usage",
+			inputTokens: 0,
+			outputTokens: 0,
+			totalTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
 		};
 
 		for (const line of lines) {
@@ -173,25 +159,18 @@ export class SessionManager {
 				if (entry.type === "session") {
 					config = entry.config;
 					this.sessionId = entry.id;
-				} else if (entry.type === "message") {
-					messages.push(entry.data);
 				} else if (entry.type === "event") {
-					// Store events as special messages so they can be rendered when restoring
-					messages.push({ type: "event", ...entry });
-				} else if (entry.type === "usage") {
-					// Accumulate usage for session summary
-					totalUsage.prompt_tokens += entry.data.prompt_tokens || 0;
-					totalUsage.completion_tokens += entry.data.completion_tokens || 0;
-					totalUsage.total_tokens += entry.data.total_tokens || 0;
-					totalUsage.cache_read_tokens += entry.data.cache_read_tokens || 0;
-					totalUsage.cache_write_tokens += entry.data.cache_write_tokens || 0;
+					events.push(entry);
+					if (entry.data.type === "token_usage") {
+						totalUsage = entry.data as Extract<AgentEvent, { type: "token_usage" }>;
+					}
 				}
 			} catch {
 				// Skip malformed lines
 			}
 		}
 
-		return config && messages.length > 0 ? { config, messages, totalUsage } : null;
+		return config && events.length > 0 ? { config, events, totalUsage } : null;
 	}
 
 	getSessionId(): string {

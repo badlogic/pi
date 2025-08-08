@@ -1,8 +1,8 @@
 import chalk from "chalk";
-import type { AgentEvent, AgentRenderer } from "../agent.js";
+import type { AgentEvent, AgentEventReceiver } from "../agent.js";
 
-export class ConsoleRenderer implements AgentRenderer {
-	render(event: AgentEvent): void {
+export class ConsoleRenderer implements AgentEventReceiver {
+	async on(event: AgentEvent): Promise<void> {
 		switch (event.type) {
 			case "assistant_start":
 				console.log(chalk.hex("#FFA500")("[assistant]"));

@@ -8,7 +8,7 @@ import {
 	WhitespaceComponent,
 } from "@mariozechner/tui";
 import chalk from "chalk";
-import type { AgentEvent, AgentRenderer } from "../agent.js";
+import type { AgentEvent, AgentEventReceiver } from "../agent.js";
 
 class LoadingAnimation extends TextComponent {
 	private frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -46,7 +46,7 @@ class LoadingAnimation extends TextComponent {
 	}
 }
 
-export class TuiRenderer implements AgentRenderer {
+export class TuiRenderer implements AgentEventReceiver {
 	private ui: TUI;
 	private chatContainer: Container;
 	private statusContainer: Container;
@@ -57,9 +57,8 @@ export class TuiRenderer implements AgentRenderer {
 	private currentLoadingAnimation: LoadingAnimation | null = null;
 	private onInterruptCallback?: () => void;
 	private lastSigintTime = 0;
-	private lastPromptTokens = 0;
-	private lastCompletionTokens = 0;
-	private lastTotalTokens = 0;
+	private lastInputTokens = 0;
+	private lastOutputTokens = 0;
 	private tokenStatusComponent: TextComponent | null = null;
 
 	constructor() {
@@ -170,7 +169,7 @@ export class TuiRenderer implements AgentRenderer {
 		this.isInitialized = true;
 	}
 
-	async render(event: AgentEvent): Promise<void> {
+	async on(event: AgentEvent): Promise<void> {
 		// Ensure UI is initialized
 		if (!this.isInitialized) {
 			await this.init();
@@ -260,9 +259,8 @@ export class TuiRenderer implements AgentRenderer {
 
 			case "token_usage":
 				// Store the latest token counts (not cumulative since prompt includes full context)
-				this.lastPromptTokens = event.promptTokens;
-				this.lastCompletionTokens = event.completionTokens;
-				this.lastTotalTokens = event.totalTokens;
+				this.lastInputTokens = event.inputTokens;
+				this.lastOutputTokens = event.outputTokens;
 				this.updateTokenDisplay();
 				break;
 
@@ -289,7 +287,7 @@ export class TuiRenderer implements AgentRenderer {
 
 		// Create new token display showing the latest API call's token usage
 		const tokenText = chalk.dim(
-			`↑${this.lastPromptTokens.toLocaleString()} ↓${this.lastCompletionTokens.toLocaleString()}`,
+			`↑${this.lastInputTokens.toLocaleString()} ↓${this.lastOutputTokens.toLocaleString()}`,
 		);
 
 		this.tokenStatusComponent = new TextComponent(tokenText);
