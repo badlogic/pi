@@ -31,14 +31,17 @@ Pod Management:
   pi ssh [<name>] "<command>"                       Run SSH command on pod
 
 Model Management:
-  pi start <model> --name <name> [--vllm ...]       Start a model
+  pi start <model> --name <name> [options]          Start a model
+    --memory <percent>   GPU memory allocation (30%, 50%, 90%)
+    --context <size>     Context window (4k, 8k, 16k, 32k, 64k, 128k)
+    --gpus <count>       Number of GPUs to use (predefined models only)
+    --vllm <args...>     Pass remaining args to vLLM (ignores other options)
   pi stop [<name>]                                  Stop model (or all if no name)
   pi list                                           List running models
   pi logs <name>                                    Stream model logs
   pi prompt <name> "<message>" [--thinking]         Test model with prompt & tools
 
   All model commands support --pod <name> to override the active pod.
-  For start: use --vllm to pass remaining args directly to vLLM.
   
 Environment:
   HF_TOKEN         HuggingFace token for model downloads
@@ -243,6 +246,7 @@ try {
 				let name: string | undefined;
 				let memory: string | undefined;
 				let context: string | undefined;
+				let gpus: number | undefined;
 				const vllmArgs: string[] = [];
 				let inVllmArgs = false;
 
@@ -258,6 +262,13 @@ try {
 					} else if (args[i] === "--context" && i + 1 < args.length) {
 						context = args[i + 1];
 						i++;
+					} else if (args[i] === "--gpus" && i + 1 < args.length) {
+						gpus = parseInt(args[i + 1]);
+						if (isNaN(gpus) || gpus < 1) {
+							console.error(chalk.red("--gpus must be a positive number"));
+							process.exit(1);
+						}
+						i++;
 					} else if (args[i] === "--vllm") {
 						inVllmArgs = true;
 					}
@@ -268,10 +279,20 @@ try {
 					process.exit(1);
 				}
 
+				// Warn if --vllm is used with other parameters
+				if (vllmArgs.length > 0 && (memory || context || gpus)) {
+					console.log(
+						chalk.yellow("⚠ Warning: --memory, --context, and --gpus are ignored when --vllm is specified"),
+					);
+					console.log(chalk.yellow("  Using only custom vLLM arguments"));
+					console.log("");
+				}
+
 				await startModel(modelId, name, {
 					pod: podOverride,
 					memory,
 					context,
+					gpus,
 					vllmArgs: vllmArgs.length > 0 ? vllmArgs : undefined,
 				});
 				break;

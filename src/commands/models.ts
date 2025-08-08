@@ -83,6 +83,7 @@ export const startModel = async (
 		vllmArgs?: string[];
 		memory?: string;
 		context?: string;
+		gpus?: number;
 	},
 ) => {
 	const { name: podName, pod } = getPod(options.pod);
@@ -109,21 +110,57 @@ export const startModel = async (
 		vllmArgs = options.vllmArgs;
 		console.log(chalk.gray("Using custom vLLM args, GPU allocation managed by vLLM"));
 	} else if (isKnownModel(modelId)) {
-		// Find best config for this hardware
-		for (let gpuCount = pod.gpus.length; gpuCount >= 1; gpuCount--) {
-			modelConfig = getModelConfig(modelId, pod.gpus, gpuCount);
+		// Handle --gpus parameter for known models
+		if (options.gpus) {
+			// Validate GPU count
+			if (options.gpus > pod.gpus.length) {
+				console.error(chalk.red(`Error: Requested ${options.gpus} GPUs but pod only has ${pod.gpus.length}`));
+				process.exit(1);
+			}
+
+			// Try to find config for requested GPU count
+			modelConfig = getModelConfig(modelId, pod.gpus, options.gpus);
 			if (modelConfig) {
-				gpus = selectGPUs(pod, gpuCount);
+				gpus = selectGPUs(pod, options.gpus);
 				vllmArgs = [...(modelConfig.args || [])];
-				break;
+			} else {
+				console.error(
+					chalk.red(`Model '${getModelName(modelId)}' does not have a configuration for ${options.gpus} GPU(s)`),
+				);
+				console.error(chalk.yellow("Available configurations:"));
+
+				// Show available configurations
+				for (let gpuCount = 1; gpuCount <= pod.gpus.length; gpuCount++) {
+					const config = getModelConfig(modelId, pod.gpus, gpuCount);
+					if (config) {
+						console.error(chalk.gray(`  - ${gpuCount} GPU(s)`));
+					}
+				}
+				process.exit(1);
+			}
+		} else {
+			// Find best config for this hardware (original behavior)
+			for (let gpuCount = pod.gpus.length; gpuCount >= 1; gpuCount--) {
+				modelConfig = getModelConfig(modelId, pod.gpus, gpuCount);
+				if (modelConfig) {
+					gpus = selectGPUs(pod, gpuCount);
+					vllmArgs = [...(modelConfig.args || [])];
+					break;
+				}
+			}
+			if (!modelConfig) {
+				console.error(chalk.red(`Model '${getModelName(modelId)}' not compatible with this pod's GPUs`));
+				process.exit(1);
 			}
 		}
-		if (!modelConfig) {
-			console.error(chalk.red(`Model '${getModelName(modelId)}' not compatible with this pod's GPUs`));
+	} else {
+		// Unknown model
+		if (options.gpus) {
+			console.error(chalk.red("Error: --gpus can only be used with predefined models"));
+			console.error(chalk.yellow("For custom models, use --vllm with tensor-parallel-size or similar arguments"));
 			process.exit(1);
 		}
-	} else {
-		// Unknown model - single GPU default
+		// Single GPU default
 		gpus = selectGPUs(pod, 1);
 		console.log(chalk.gray("Unknown model, defaulting to single GPU"));
 	}

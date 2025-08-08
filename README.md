@@ -100,6 +100,7 @@ pi ssh [<name>] "<command>"                   # Run command on pod
 pi start <model> --name <name> [options]  # Start a model
   --memory <percent>      # GPU memory: 30%, 50%, 90% (default: 90%)
   --context <size>        # Context window: 4k, 8k, 16k, 32k, 64k, 128k
+  --gpus <count>          # Number of GPUs to use (predefined models only)
   --pod <name>            # Target specific pod (overrides active)
   --vllm <args...>        # Pass custom args directly to vLLM
 
@@ -236,6 +237,18 @@ pi start model2 --name m2  # Auto-assigns to GPU 1
 pi start model3 --name m3  # Auto-assigns to GPU 2
 ```
 
+### Specify GPU Count for Predefined Models
+For predefined models with multiple configurations, use `--gpus` to control GPU usage:
+```bash
+# Run Qwen on 1 GPU instead of all available
+pi start Qwen/Qwen2.5-Coder-32B-Instruct --name qwen --gpus 1
+
+# Run GLM-4.5 on 8 GPUs (if it has an 8-GPU config)
+pi start zai-org/GLM-4.5 --name glm --gpus 8
+```
+
+If the model doesn't have a configuration for the requested GPU count, you'll see available options.
+
 ### Tensor Parallelism for Large Models
 For models that don't fit on a single GPU:
 ```bash
@@ -319,7 +332,7 @@ pi start Qwen/Qwen2.5-Coder-32B-Instruct --name coder \
   --context 64k --memory 70%
 ```
 
-These settings will be ignored if you also specify `--vllm`.
+**Note**: When using `--vllm`, the `--memory`, `--context`, and `--gpus` parameters are ignored. You'll see a warning if you try to use them together.
 
 ## Session Persistence
 
