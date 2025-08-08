@@ -205,7 +205,6 @@ case "$VLLM_VERSION" in
         # Set environment variables for verbose build
         export VERBOSE=1
         export CMAKE_VERBOSE_MAKEFILE=ON
-        export MAX_JOBS=4  # Limit parallel jobs to avoid OOM
         
         echo "Starting vLLM build (this WILL take 10-15 minutes)..."
         echo "Build will show detailed progress..."
