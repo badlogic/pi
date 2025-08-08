@@ -198,7 +198,7 @@ export async function callModelChatCompletionsApi(
 				messages,
 				tools: toolsForChat,
 				tool_choice: "auto",
-				max_tokens: 2000, // TODO make configurable
+				max_completion_tokens: 2000, // TODO make configurable
 			},
 			{ signal },
 		);

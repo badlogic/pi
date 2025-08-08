@@ -1,11 +1,18 @@
-import { resolve } from "path";
 import { homedir } from "os";
+import { resolve } from "path";
+
+export type Choice<T = string> = {
+	value: T;
+	description?: string;
+};
 
 export type ArgDef = {
 	type: "flag" | "boolean" | "int" | "float" | "string" | "file";
 	alias?: string;
 	default?: any;
 	description?: string;
+	choices?: Choice[] | string[]; // Can be simple strings or objects with descriptions
+	showDefault?: boolean | string; // false to hide, true to show value, string to show custom text
 };
 
 export type ArgDefs = Record<string, ArgDef>;
@@ -14,16 +21,16 @@ export type ParsedArgs<T extends ArgDefs> = {
 	[K in keyof T]: T[K]["type"] extends "flag"
 		? boolean
 		: T[K]["type"] extends "boolean"
-		? boolean
-		: T[K]["type"] extends "int"
-		? number
-		: T[K]["type"] extends "float"
-		? number
-		: T[K]["type"] extends "string"
-		? string
-		: T[K]["type"] extends "file"
-		? string
-		: never;
+			? boolean
+			: T[K]["type"] extends "int"
+				? number
+				: T[K]["type"] extends "float"
+					? number
+					: T[K]["type"] extends "string"
+						? string
+						: T[K]["type"] extends "file"
+							? string
+							: never;
 } & {
 	_: string[]; // Positional arguments
 };
@@ -66,35 +73,50 @@ export function parseArgs<T extends ArgDefs>(defs: T, args: string[]): ParsedArg
 			} else if (i + 1 < args.length) {
 				// Flag with value
 				const value = args[++i];
-				
+
+				let parsedValue: any;
+
 				switch (def.type) {
 					case "boolean":
-						result[key] = value === "true" || value === "1" || value === "yes";
+						parsedValue = value === "true" || value === "1" || value === "yes";
 						break;
 					case "int":
-						result[key] = parseInt(value, 10);
-						if (isNaN(result[key])) {
+						parsedValue = parseInt(value, 10);
+						if (isNaN(parsedValue)) {
 							throw new Error(`Invalid integer value for --${key}: ${value}`);
 						}
 						break;
 					case "float":
-						result[key] = parseFloat(value);
-						if (isNaN(result[key])) {
+						parsedValue = parseFloat(value);
+						if (isNaN(parsedValue)) {
 							throw new Error(`Invalid float value for --${key}: ${value}`);
 						}
 						break;
 					case "string":
-						result[key] = value;
+						parsedValue = value;
 						break;
-					case "file":
+					case "file": {
 						// Resolve ~ to home directory and make absolute
 						let path = value;
 						if (path.startsWith("~")) {
 							path = path.replace("~", homedir());
 						}
-						result[key] = resolve(path);
+						parsedValue = resolve(path);
 						break;
+					}
 				}
+
+				// Validate against choices if specified
+				if (def.choices) {
+					const validValues = def.choices.map((c) => (typeof c === "string" ? c : c.value));
+					if (!validValues.includes(parsedValue)) {
+						throw new Error(
+							`Invalid value for --${key}: "${parsedValue}". Valid choices: ${validValues.join(", ")}`,
+						);
+					}
+				}
+
+				result[key] = parsedValue;
 			} else {
 				throw new Error(`Flag --${key} requires a value`);
 			}
@@ -126,27 +148,57 @@ export function parseArgs<T extends ArgDefs>(defs: T, args: string[]): ParsedArg
 export function printHelp<T extends ArgDefs>(defs: T, usage: string): void {
 	console.log(usage);
 	console.log("\nOptions:");
-	
+
 	for (const [key, def] of Object.entries(defs)) {
 		let line = `  --${key}`;
 		if (def.alias) {
 			line += `, -${def.alias}`;
 		}
-		
+
 		if (def.type !== "flag") {
-			const typeStr = def.type === "file" ? "path" : def.type;
-			line += ` <${typeStr}>`;
+			if (def.choices) {
+				// Show choices instead of type
+				const simpleChoices = def.choices.filter((c) => typeof c === "string");
+				if (simpleChoices.length === def.choices.length) {
+					// All choices are simple strings
+					line += ` <${simpleChoices.join("|")}>`;
+				} else {
+					// Has descriptions, just show the type
+					const typeStr = def.type === "file" ? "path" : def.type;
+					line += ` <${typeStr}>`;
+				}
+			} else {
+				const typeStr = def.type === "file" ? "path" : def.type;
+				line += ` <${typeStr}>`;
+			}
 		}
-		
+
 		if (def.description) {
 			// Pad to align descriptions
-			line = line.padEnd(25) + def.description;
+			line = line.padEnd(30) + def.description;
 		}
-		
-		if (def.default !== undefined) {
-			line += ` (default: ${def.default})`;
+
+		if (def.default !== undefined && def.type !== "flag" && def.showDefault !== false) {
+			if (typeof def.showDefault === "string") {
+				line += ` (default: ${def.showDefault})`;
+			} else {
+				line += ` (default: ${def.default})`;
+			}
 		}
-		
+
 		console.log(line);
+
+		// Print choices with descriptions if available
+		if (def.choices) {
+			const hasDescriptions = def.choices.some((c) => typeof c === "object" && c.description);
+			if (hasDescriptions) {
+				for (const choice of def.choices) {
+					if (typeof choice === "object") {
+						const choiceLine = `      ${choice.value}`.padEnd(30) + (choice.description || "");
+						console.log(choiceLine);
+					}
+				}
+			}
+		}
 	}
 }

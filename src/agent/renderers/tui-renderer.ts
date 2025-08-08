@@ -59,6 +59,8 @@ export class TuiRenderer implements AgentEventReceiver {
 	private lastSigintTime = 0;
 	private lastInputTokens = 0;
 	private lastOutputTokens = 0;
+	private lastCacheReadTokens = 0;
+	private lastCacheWriteTokens = 0;
 	private tokenStatusComponent: TextComponent | null = null;
 
 	constructor() {
@@ -257,6 +259,8 @@ export class TuiRenderer implements AgentEventReceiver {
 				// Store the latest token counts (not cumulative since prompt includes full context)
 				this.lastInputTokens = event.inputTokens;
 				this.lastOutputTokens = event.outputTokens;
+				this.lastCacheReadTokens = event.cacheReadTokens;
+				this.lastCacheWriteTokens = event.cacheWriteTokens;
 				this.updateTokenDisplay();
 				break;
 
@@ -281,10 +285,20 @@ export class TuiRenderer implements AgentEventReceiver {
 		// Clear and update token display
 		this.tokenContainer.clear();
 
-		// Create new token display showing the latest API call's token usage
-		const tokenText = chalk.dim(
-			`↑${this.lastInputTokens.toLocaleString()} ↓${this.lastOutputTokens.toLocaleString()}`,
-		);
+		// Build token display text
+		let tokenText = chalk.dim(`↑${this.lastInputTokens.toLocaleString()} ↓${this.lastOutputTokens.toLocaleString()}`);
+
+		// Add cache info if available
+		if (this.lastCacheReadTokens > 0 || this.lastCacheWriteTokens > 0) {
+			const cacheText: string[] = [];
+			if (this.lastCacheReadTokens > 0) {
+				cacheText.push(`⟲${this.lastCacheReadTokens.toLocaleString()}`);
+			}
+			if (this.lastCacheWriteTokens > 0) {
+				cacheText.push(`⟳${this.lastCacheWriteTokens.toLocaleString()}`);
+			}
+			tokenText += chalk.dim(` (${cacheText.join(" ")})`);
+		}
 
 		this.tokenStatusComponent = new TextComponent(tokenText);
 		this.tokenContainer.addChild(this.tokenStatusComponent);

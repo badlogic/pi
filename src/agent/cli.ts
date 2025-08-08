@@ -13,17 +13,22 @@ const argDefs = {
 	"api-key": {
 		type: "string" as const,
 		default: process.env.OPENAI_API_KEY || "",
-		description: "API key (or set OPENAI_API_KEY)",
+		description: "API key",
+		showDefault: "$OPENAI_API_KEY",
 	},
 	model: {
 		type: "string" as const,
-		default: "gpt-4o-mini",
+		default: "gpt-5-mini",
 		description: "Model name",
 	},
 	api: {
 		type: "string" as const,
 		default: "completions",
-		description: 'API type: "completions" or "responses"',
+		description: "API type",
+		choices: [
+			{ value: "completions", description: "OpenAI Chat Completions API (most models)" },
+			{ value: "responses", description: "OpenAI Responses API (GPT-OSS models)" },
+		],
 	},
 	"system-prompt": {
 		type: "string" as const,
@@ -32,6 +37,7 @@ const argDefs = {
 	},
 	continue: {
 		type: "flag" as const,
+		alias: "c",
 		description: "Continue previous session",
 	},
 	json: {
