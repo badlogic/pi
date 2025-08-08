@@ -147,9 +147,25 @@ Current working directory: ${process.cwd()}
 				if (msg.role === "user") {
 					await renderer.render({ type: "user_message", text: msg.content });
 				} else if (msg.role === "assistant") {
-					// Render assistant response
+					// Assistant messages can have content, tool_calls, or both
+					await renderer.render({ type: "assistant_start" });
+
+					// Render tool calls if present
+					if (msg.tool_calls && msg.tool_calls.length > 0) {
+						for (const toolCall of msg.tool_calls) {
+							const funcName = toolCall.type === "function" ? toolCall.function.name : toolCall.custom?.name;
+							const funcArgs =
+								toolCall.type === "function" ? toolCall.function.arguments : toolCall.custom?.input;
+							await renderer.render({
+								type: "tool_call",
+								name: funcName || "unknown",
+								args: funcArgs || "{}",
+							});
+						}
+					}
+
+					// Render content if present
 					if (msg.content) {
-						await renderer.render({ type: "assistant_start" });
 						await renderer.render({ type: "assistant_message", text: msg.content });
 					}
 				} else if (msg.role === "tool") {
@@ -159,18 +175,6 @@ Current working directory: ${process.cwd()}
 						result: msg.content || "",
 						isError: false,
 					});
-				} else if (msg.tool_calls) {
-					// Assistant message with tool calls
-					await renderer.render({ type: "assistant_start" });
-					for (const toolCall of msg.tool_calls) {
-						const funcName = toolCall.type === "function" ? toolCall.function.name : toolCall.custom?.name;
-						const funcArgs = toolCall.type === "function" ? toolCall.function.arguments : toolCall.custom?.input;
-						await renderer.render({
-							type: "tool_call",
-							name: funcName || "unknown",
-							args: funcArgs || "{}",
-						});
-					}
 				} else if (msg.type === "reasoning") {
 					// Reasoning/thinking message (for GPT-OSS)
 					for (const content of msg.content || []) {
