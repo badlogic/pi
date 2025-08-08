@@ -39,7 +39,7 @@ Model Management:
   pi stop [<name>]                                  Stop model (or all if no name)
   pi list                                           List running models
   pi logs <name>                                    Stream model logs
-  pi prompt <name> "<message>" [--thinking]         Test model with prompt & tools
+  pi agent <name> "<message>" [--thinking]          Chat with model using agent & tools
 
   All model commands support --pod <name> to override the active pod.
   
@@ -264,7 +264,7 @@ try {
 						i++;
 					} else if (args[i] === "--gpus" && i + 1 < args.length) {
 						gpus = parseInt(args[i + 1]);
-						if (isNaN(gpus) || gpus < 1) {
+						if (Number.isNaN(gpus) || gpus < 1) {
 							console.error(chalk.red("--gpus must be a positive number"));
 							process.exit(1);
 						}
@@ -323,11 +323,11 @@ try {
 				await viewLogs(name, { pod: podOverride });
 				break;
 			}
-			case "prompt": {
-				// pi prompt <name> ["<message>"] [-i|--interactive]
+			case "agent": {
+				// pi agent <name> ["<message>"] [-i|--interactive]
 				const name = args[1];
 				if (!name) {
-					console.error('Usage: pi prompt <name> ["<message>"] [-i|--interactive]');
+					console.error('Usage: pi agent <name> ["<message>"] [-i|--interactive]');
 					process.exit(1);
 				}
 
@@ -344,7 +344,7 @@ try {
 				}
 
 				if (!interactive && messages.length === 0) {
-					console.error('Usage: pi prompt <name> "<message>"... or pi prompt <name> -i [-c]');
+					console.error('Usage: pi agent <name> "<message>"... or pi agent <name> -i [-c]');
 					process.exit(1);
 				}
 

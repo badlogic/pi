@@ -5,10 +5,11 @@
 	"type": "module",
 	"main": "dist/index.js",
 	"bin": {
-		"pi": "dist/cli.js"
+		"pi": "dist/cli.js",
+		"pi-agent": "dist/agent/agent.js"
 	},
 	"scripts": {
-		"build": "tsc && cp src/models.json dist/",
+		"build": "tsc && cp src/models.json dist/ && chmod +x dist/agent/agent.js",
 		"dev": "tsc --watch --preserveWatchOutput",
 		"clean": "rm -rf dist",
 		"prepublishOnly": "npm run clean && npm run build",

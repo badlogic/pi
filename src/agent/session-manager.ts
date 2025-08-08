@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
-import type { AgentEvent } from "./agent";
+import type { AgentConfig, AgentEvent, AgentEventReceiver } from "../agent/agent.js";
 
 // Simple UUID v4 generator
 function uuidv4(): string {
@@ -13,34 +13,27 @@ function uuidv4(): string {
 	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
-export interface SessionConfig {
-	baseURL: string;
-	model: string;
-	api: "chat completions" | "responses";
-	systemPrompt: string;
-}
-
 export interface SessionHeader {
 	type: "session";
 	id: string;
 	timestamp: string;
 	cwd: string;
-	config: SessionConfig;
+	config: AgentConfig;
 }
 
 export interface SessionEvent {
 	type: "event";
 	timestamp: string;
-	agentEvent: AgentEvent;
+	event: AgentEvent;
 }
 
 export interface SessionData {
-	config: SessionConfig;
+	config: AgentConfig;
 	events: SessionEvent[];
 	totalUsage: Extract<AgentEvent, { type: "token_usage" }>;
 }
 
-export class SessionManager {
+export class SessionManager implements AgentEventReceiver {
 	private sessionId!: string;
 	private sessionFile!: string;
 	private sessionDir: string;
@@ -99,7 +92,6 @@ export class SessionManager {
 	}
 
 	private loadSessionId(): void {
-		// TODO this whole function looks very broken
 		if (!existsSync(this.sessionFile)) return;
 
 		const lines = readFileSync(this.sessionFile, "utf8").trim().split("\n");
@@ -118,7 +110,7 @@ export class SessionManager {
 		this.sessionId = uuidv4();
 	}
 
-	startSession(config: SessionConfig): void {
+	startSession(config: AgentConfig): void {
 		const entry: SessionHeader = {
 			type: "session",
 			id: this.sessionId,
@@ -129,20 +121,19 @@ export class SessionManager {
 		appendFileSync(this.sessionFile, JSON.stringify(entry) + "\n");
 	}
 
-	on(event: AgentEvent): void {
+	async on(event: AgentEvent): Promise<void> {
 		const entry: SessionEvent = {
 			type: "event",
 			timestamp: new Date().toISOString(),
-			agentEvent: event,
+			event: event,
 		};
 		appendFileSync(this.sessionFile, JSON.stringify(entry) + "\n");
 	}
 
-	loadSession(): SessionData | null {
+	getSessionData(): SessionData | null {
 		if (!existsSync(this.sessionFile)) return null;
 
-		const lines = readFileSync(this.sessionFile, "utf8").trim().split("\n");
-		let config: SessionConfig | null = null;
+		let config: AgentConfig | null = null;
 		const events: SessionEvent[] = [];
 		let totalUsage: Extract<AgentEvent, { type: "token_usage" }> = {
 			type: "token_usage",
@@ -153,6 +144,7 @@ export class SessionManager {
 			cacheWriteTokens: 0,
 		};
 
+		const lines = readFileSync(this.sessionFile, "utf8").trim().split("\n");
 		for (const line of lines) {
 			try {
 				const entry = JSON.parse(line);
@@ -160,9 +152,10 @@ export class SessionManager {
 					config = entry.config;
 					this.sessionId = entry.id;
 				} else if (entry.type === "event") {
-					events.push(entry);
-					if (entry.data.type === "token_usage") {
-						totalUsage = entry.data as Extract<AgentEvent, { type: "token_usage" }>;
+					const eventEntry: SessionEvent = entry as SessionEvent;
+					events.push(eventEntry);
+					if (eventEntry.event.type === "token_usage") {
+						totalUsage = entry.event as Extract<AgentEvent, { type: "token_usage" }>;
 					}
 				}
 			} catch {
@@ -170,7 +163,7 @@ export class SessionManager {
 			}
 		}
 
-		return config && events.length > 0 ? { config, events, totalUsage } : null;
+		return config ? { config, events, totalUsage } : null;
 	}
 
 	getSessionId(): string {

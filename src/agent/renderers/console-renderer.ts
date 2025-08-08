@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import type { AgentEvent, AgentEventReceiver } from "../agent.js";
+import type { AgentEvent, AgentEventReceiver } from "../../agent/agent.js";
 
 export class ConsoleRenderer implements AgentEventReceiver {
 	async on(event: AgentEvent): Promise<void> {

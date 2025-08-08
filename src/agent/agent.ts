@@ -1,8 +1,8 @@
+#!/usr/bin/env node
 import OpenAI from "openai";
 import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
-import { ConsoleRenderer } from "./renderers/console-renderer";
-import type { SessionManager } from "./session-manager";
-import { executeTool, toolsForChat, toolsForResponses } from "./tools/tools";
+import type { SessionManager } from "./session-manager.js";
+import { executeTool, toolsForChat, toolsForResponses } from "./tools/tools.js";
 
 export type AgentEvent =
 	| { type: "assistant_start" }
@@ -30,8 +30,8 @@ export interface AgentConfig {
 	apiKey: string;
 	baseURL: string;
 	model: string;
-	isGptOss: boolean;
-	systemPrompt?: string;
+	api: "completions" | "responses";
+	systemPrompt: string;
 }
 
 export interface ToolCall {
@@ -291,16 +291,11 @@ export class Agent {
 		// Initialize with system prompt if provided
 		if (config.systemPrompt) {
 			this.messages.push({ role: "system", content: config.systemPrompt });
-			// Log to session if this is a new session
-			if (sessionManager && this.messages.length === 1) {
-				sessionManager.logSession({
-					model: config.model,
-					baseURL: config.baseURL,
-					isGptOss: config.isGptOss,
-					systemPrompt: config.systemPrompt,
-				});
-				sessionManager.logMessage({ role: "system", content: config.systemPrompt });
-			}
+		}
+
+		// Start session logging if we have a session manager
+		if (sessionManager) {
+			sessionManager.startSession(this.config);
 		}
 	}
 
@@ -311,13 +306,12 @@ export class Agent {
 		// Add user message
 		const userMsg = { role: "user", content: userMessage };
 		this.messages.push(userMsg);
-		this.sessionManager?.logMessage(userMsg);
 
 		// Create a new AbortController for this chat session
 		this.abortController = new AbortController();
 
 		try {
-			if (this.config.isGptOss) {
+			if (this.config.api === "responses") {
 				await callModelResponsesApi(
 					this.client,
 					this.config.model,
@@ -350,16 +344,303 @@ export class Agent {
 		this.abortController?.abort();
 	}
 
-	getMessages(): any[] {
-		return [...this.messages];
+	setEvents(events: AgentEvent[]): void {
+		// Reconstruct messages from events based on API type
+		this.messages = [];
+
+		if (this.config.api === "responses") {
+			// Responses API format
+			if (this.config.systemPrompt) {
+				this.messages.push({
+					type: "system",
+					content: [{ type: "system_text", text: this.config.systemPrompt }],
+				});
+			}
+
+			for (const event of events) {
+				switch (event.type) {
+					case "user_message":
+						this.messages.push({
+							type: "user",
+							content: [{ type: "input_text", text: event.text }],
+						});
+						break;
+
+					case "thinking":
+						// Add reasoning message
+						this.messages.push({
+							type: "reasoning",
+							content: [{ type: "reasoning_text", text: event.text }],
+						});
+						break;
+
+					case "tool_call":
+						// Add function call
+						this.messages.push({
+							type: "function_call",
+							id: event.toolCallId,
+							name: event.name,
+							arguments: event.args,
+						});
+						break;
+
+					case "tool_result":
+						// Add function result
+						this.messages.push({
+							type: "function_call_output",
+							call_id: event.toolCallId,
+							output: event.result,
+						});
+						break;
+
+					case "assistant_message":
+						// Add final message
+						this.messages.push({
+							type: "message",
+							content: [{ type: "output_text", text: event.text }],
+						});
+						break;
+				}
+			}
+		} else {
+			// Chat Completions API format
+			if (this.config.systemPrompt) {
+				this.messages.push({ role: "system", content: this.config.systemPrompt });
+			}
+
+			// Track tool calls in progress
+			let pendingToolCalls: any[] = [];
+
+			for (const event of events) {
+				switch (event.type) {
+					case "user_message":
+						this.messages.push({ role: "user", content: event.text });
+						break;
+
+					case "assistant_start":
+						// Reset pending tool calls for new assistant response
+						pendingToolCalls = [];
+						break;
+
+					case "tool_call":
+						// Accumulate tool calls
+						pendingToolCalls.push({
+							id: event.toolCallId,
+							type: "function",
+							function: {
+								name: event.name,
+								arguments: event.args,
+							},
+						});
+						break;
+
+					case "tool_result":
+						// When we see the first tool result, add the assistant message with all tool calls
+						if (pendingToolCalls.length > 0) {
+							this.messages.push({
+								role: "assistant",
+								content: null,
+								tool_calls: pendingToolCalls,
+							});
+							pendingToolCalls = [];
+						}
+						// Add the tool result
+						this.messages.push({
+							role: "tool",
+							tool_call_id: event.toolCallId,
+							content: event.result,
+						});
+						break;
+
+					case "assistant_message":
+						// Final assistant response (no tool calls)
+						this.messages.push({ role: "assistant", content: event.text });
+						break;
+
+					// Skip other event types (thinking, error, interrupted, token_usage)
+				}
+			}
+		}
+	}
+}
+
+// Main function to use Agent as standalone CLI or programmatically
+export async function main(args: string[]): Promise<void> {
+	// Parse command line arguments
+	let baseURL = "https://api.openai.com/v1";
+	let apiKey = process.env.OPENAI_API_KEY || "";
+	let model = "gpt-4o-mini";
+	let continueSession = false;
+	let api: "completions" | "responses" = "completions";
+	let systemPrompt = "You are a helpful assistant.";
+
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--base-url" && i + 1 < args.length) {
+			baseURL = args[++i];
+		} else if (args[i] === "--api-key" && i + 1 < args.length) {
+			apiKey = args[++i];
+		} else if (args[i] === "--model" && i + 1 < args.length) {
+			model = args[++i];
+		} else if (args[i] === "--continue") {
+			continueSession = true;
+		} else if (args[i] === "--api" && i + 1 < args.length) {
+			api = args[++i] as "completions" | "responses";
+		} else if (args[i] === "--system-prompt" && i + 1 < args.length) {
+			systemPrompt = args[++i];
+		} else if (args[i] === "--help" || args[i] === "-h") {
+			console.log(`Usage: node agent.js [options] [message]
+
+Options:
+  --base-url <url>        API base URL (default: https://api.openai.com/v1)
+  --api-key <key>         API key (or set OPENAI_API_KEY env var)
+  --model <model>         Model name (default: gpt-4o-mini)
+  --api <type>            API type: "completions" or "responses" (default: completions)
+  --system-prompt <text>  System prompt (default: "You are a helpful assistant.")
+  --continue              Continue previous session
+  --help, -h              Show this help message
+
+Examples:
+  # Single message
+  node agent.js --api-key sk-... "What is 2+2?"
+
+  # Continue conversation
+  node agent.js --continue "What about 3+3?"
+
+  # Use local vLLM
+  node agent.js --base-url http://localhost:8000/v1 --model meta-llama/Llama-3.1-8B-Instruct "Hello"
+
+  # Interactive mode (no message = interactive)
+  node agent.js --api-key sk-...
+`);
+			return;
+		}
 	}
 
-	setMessages(messages: any[]): void {
-		this.messages = [...messages];
+	// Get message from remaining args
+	const message = args.filter((arg) => !arg.startsWith("--")).join(" ");
+
+	if (!apiKey) {
+		throw new Error("API key required (use --api-key or set OPENAI_API_KEY)");
 	}
 
-	clearMessages(): void {
-		// Keep system prompt if it exists
-		this.messages = this.config.systemPrompt ? [{ role: "system", content: this.config.systemPrompt }] : [];
+	// Import dependencies
+	const { ConsoleRenderer } = await import("./renderers/console-renderer.js");
+	const { SessionManager } = await import("./session-manager.js");
+	const { TuiRenderer } = await import("./renderers/tui-renderer.js");
+
+	// Create renderer based on whether we have a message
+	const isInteractive = !message;
+	const renderer = isInteractive ? new TuiRenderer() : new ConsoleRenderer();
+	
+	// Show configuration in interactive mode
+	if (isInteractive) {
+		console.log(`Using: ${baseURL} with model ${model}`);
+		if (!apiKey || apiKey === "dummy") {
+			console.log("Warning: No valid API key provided. Set OPENAI_API_KEY or use --api-key");
+		}
 	}
+
+	// Create session manager
+	const sessionManager = new SessionManager(continueSession);
+
+	// Create or restore agent
+	let agent: Agent;
+
+	if (continueSession) {
+		const sessionData = sessionManager.getSessionData();
+		if (sessionData) {
+			// Resume with existing config
+			console.log(`Resuming session with ${sessionData.events.length} events`);
+			agent = new Agent(
+				{
+					...sessionData.config,
+					apiKey, // Allow overriding API key
+				},
+				renderer,
+				sessionManager,
+			);
+			// Restore events
+			const agentEvents = sessionData.events.map((e) => e.event);
+			agent.setEvents(agentEvents);
+
+			// Replay events to renderer for visual continuity
+			if (isInteractive && renderer instanceof TuiRenderer) {
+				await renderer.init();
+				for (const sessionEvent of sessionData.events) {
+					const event = sessionEvent.event;
+					if (event.type === "assistant_start") {
+						renderer.renderAssistantLabel();
+					} else {
+						await renderer.on(event);
+					}
+				}
+			}
+		} else {
+			console.log("No previous session found, starting new session");
+			agent = new Agent(
+				{
+					apiKey,
+					baseURL,
+					model,
+					api,
+					systemPrompt: "You are a helpful assistant.",
+				},
+				renderer,
+				sessionManager,
+			);
+		}
+	} else {
+		agent = new Agent(
+			{
+				apiKey,
+				baseURL,
+				model,
+				api,
+				systemPrompt,
+			},
+			renderer,
+			sessionManager,
+		);
+	}
+
+	// Run in appropriate mode
+	if (isInteractive) {
+		// Interactive mode with TUI
+		const tui = renderer as InstanceType<typeof TuiRenderer>;
+		await tui.init();
+
+		tui.setInterruptCallback(() => {
+			agent.interrupt();
+		});
+
+		while (true) {
+			const userInput = await tui.getUserInput();
+			if (userInput.toLowerCase() === "exit" || userInput.toLowerCase() === "quit") {
+				tui.stop();
+				break;
+			}
+
+			try {
+				await agent.chat(userInput);
+			} catch (e: any) {
+				await renderer.on({ type: "error", message: e.message });
+			}
+		}
+	} else {
+		// Single message mode
+		try {
+			await agent.chat(message);
+		} catch (e: any) {
+			await renderer.on({ type: "error", message: e.message });
+			throw e;
+		}
+	}
+}
+
+// Run as CLI if invoked directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+	main(process.argv.slice(2)).catch((err) => {
+		console.error(err);
+		process.exit(1);
+	});
 }

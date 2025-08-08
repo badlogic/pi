@@ -8,7 +8,7 @@ import {
 	WhitespaceComponent,
 } from "@mariozechner/tui";
 import chalk from "chalk";
-import type { AgentEvent, AgentEventReceiver } from "../agent.js";
+import type { AgentEvent, AgentEventReceiver } from "../../agent/agent.js";
 
 class LoadingAnimation extends TextComponent {
 	private frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
