@@ -232,49 +232,13 @@ case "$VLLM_VERSION" in
         echo "Python: $(which python)"
         echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'Not found')"
         
-        # Use pip install with keepalive to prevent SSH timeout
-        echo "Starting build with keepalive (dots every 30s to prevent SSH timeout)..."
-        
-        # Run build in background and monitor it
-        uv pip install -vv --no-build-isolation -e . > /tmp/vllm_build.log 2>&1 &
-        BUILD_PID=$!
-        
-        # Monitor build and print progress
-        LAST_LINE=""
-        DOT_COUNT=0
-        while kill -0 $BUILD_PID 2>/dev/null; do
-            # Get last meaningful line from build log
-            if [ -f /tmp/vllm_build.log ]; then
-                CURRENT_LINE=$(grep -E "(Building|Compiling|Linking|Installing|error|Error|WARNING|%)" /tmp/vllm_build.log | tail -1)
-                if [ "$CURRENT_LINE" != "$LAST_LINE" ] && [ -n "$CURRENT_LINE" ]; then
-                    echo "$CURRENT_LINE"
-                    LAST_LINE="$CURRENT_LINE"
-                    DOT_COUNT=0
-                fi
-            fi
-            
-            # Print keepalive dot every 30 seconds
-            sleep 30
-            if kill -0 $BUILD_PID 2>/dev/null; then
-                DOT_COUNT=$((DOT_COUNT + 1))
-                echo "[$(date +%H:%M:%S)] Still building... (${DOT_COUNT}m elapsed since last output)"
-            fi
-        done
-        
-        # Wait for build to complete and get exit code
-        wait $BUILD_PID
-        BUILD_EXIT_CODE=$?
-        
-        # Show any final output
-        if [ -f /tmp/vllm_build.log ]; then
-            tail -20 /tmp/vllm_build.log
-        fi
-        
-        if [ $BUILD_EXIT_CODE -ne 0 ]; then
-            echo "ERROR: Build failed with exit code $BUILD_EXIT_CODE"
-            echo "Full log available at /tmp/vllm_build.log"
-            exit $BUILD_EXIT_CODE
-        fi
+        # Run build directly with minimal verbosity
+        echo "Starting vLLM build (this WILL take 10-20 minutes)..."
+        echo "Build output:"
+        uv pip install --no-build-isolation -e . || {
+            echo "ERROR: vLLM build failed"
+            exit 1
+        }
         
         # Check if install succeeded (pipe above always returns 0)
         if ! python -c "import vllm" 2>/dev/null; then
