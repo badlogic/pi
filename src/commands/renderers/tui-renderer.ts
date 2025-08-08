@@ -119,6 +119,10 @@ export class TuiRenderer implements AgentRenderer {
 
 				// Show interruption message
 				this.chatContainer.addChild(new TextComponent(chalk.red("[Interrupted by user]"), { bottom: 1 }));
+
+				// Re-enable editor submission
+				this.editor.disableSubmit = false;
+
 				this.ui.requestRender();
 
 				// Don't forward to editor
