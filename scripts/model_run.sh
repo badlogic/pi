@@ -8,6 +8,13 @@ NAME="{{NAME}}"
 PORT="{{PORT}}"
 VLLM_ARGS="{{VLLM_ARGS}}"
 
+# Trap to ensure cleanup on exit
+cleanup() {
+    echo "Model runner exiting with code $?"
+    exit $?
+}
+trap cleanup EXIT
+
 # Force colored output even when not a TTY
 export FORCE_COLOR=1
 export PYTHONUNBUFFERED=1
@@ -53,5 +60,14 @@ echo "========================================="
 echo ""
 
 # Run vLLM (this blocks until killed)
-# Use exec to replace this shell with vLLM, so signals go directly to it
-exec bash -c "$VLLM_CMD"
+# Don't use exec so we can capture the exit code
+bash -c "$VLLM_CMD"
+VLLM_EXIT_CODE=$?
+
+if [ $VLLM_EXIT_CODE -ne 0 ]; then
+    echo "❌ ERROR: vLLM exited with code $VLLM_EXIT_CODE" >&2
+    exit $VLLM_EXIT_CODE
+fi
+
+echo "✅ vLLM exited normally"
+exit 0
