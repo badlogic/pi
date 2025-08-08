@@ -1,8 +1,7 @@
 import chalk from "chalk";
-import * as readline from "readline/promises";
 import { getActivePod, loadConfig } from "../config.js";
 import type { AgentRenderer } from "./agent.js";
-import { Agent, display } from "./agent.js";
+import { Agent } from "./agent.js";
 import { ConsoleRenderer } from "./renderers/console-renderer.js";
 import { TuiRenderer } from "./renderers/tui-renderer.js";
 
@@ -14,7 +13,6 @@ interface PromptOptions {
 	pod?: string;
 	interactive?: boolean;
 	apiKey?: string;
-	ui?: "console" | "tui";
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -26,7 +24,7 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 	const activePod = opts.pod ? { name: opts.pod, pod: loadConfig().pods[opts.pod] } : getActivePod();
 
 	if (!activePod) {
-		display.error("No active pod. Use 'pi pods active <name>' to set one.");
+		console.error(chalk.red("No active pod. Use 'pi pods active <name>' to set one."));
 		process.exit(1);
 	}
 
@@ -34,7 +32,7 @@ export async function promptModel(modelName: string, userMessages: string[] | un
 	const modelConfig = pod.models[modelName];
 
 	if (!modelConfig) {
-		display.error(`Model '${modelName}' not found on pod '${podName}'`);
+		console.error(chalk.red(`Model '${modelName}' not found on pod '${podName}'`));
 		process.exit(1);
 	}
 
@@ -64,13 +62,11 @@ File paths you output must include line numbers where possible, e.g. "src/index.
 Current working directory: ${process.cwd()}
 `;
 
-	// Create renderer based on UI option
+	// Create renderer - TUI for interactive, console for single-shot
 	let renderer: AgentRenderer;
-	let tuiRenderer: TuiRenderer | null = null; // Store TUI renderer for cleanup
 
-	if (opts.ui === "tui" && opts.interactive) {
-		tuiRenderer = new TuiRenderer();
-		renderer = tuiRenderer;
+	if (opts.interactive) {
+		renderer = new TuiRenderer();
 	} else {
 		renderer = new ConsoleRenderer();
 	}
@@ -87,71 +83,29 @@ Current working directory: ${process.cwd()}
 		renderer,
 	);
 
-	// Interactive mode
-	if (opts.interactive) {
-		if (tuiRenderer) {
-			// TUI mode - use TUI for input
-			await tuiRenderer.init();
+	// Interactive mode - always use TUI
+	if (opts.interactive && renderer instanceof TuiRenderer) {
+		await renderer.init();
 
-			// Handle Ctrl+C
-			process.on("SIGINT", () => {
-				tuiRenderer.stop();
-				process.exit(0);
-			});
+		// Handle Ctrl+C
+		process.on("SIGINT", () => {
+			renderer.stop();
+			process.exit(0);
+		});
 
-			while (true) {
-				const userInput = await tuiRenderer.getUserInput();
+		while (true) {
+			const userInput = await renderer.getUserInput();
 
-				try {
-					await agent.chat(userInput);
-				} catch (e: any) {
-					renderer.render({ type: "error", message: e.message });
-				}
-			}
-		} else {
-			// Console mode - use readline
-			const rl = readline.createInterface({
-				input: process.stdin,
-				output: process.stdout,
-			});
-
-			console.log(chalk.gray("Interactive mode. CTRL + C to quit.\n"));
-
-			while (true) {
-				console.log(chalk.green("[user]"));
-				let userInput = await rl.question(`${chalk.green("> ")}`);
-
-				// Check for multiline input marker
-				if (userInput === '"""' || userInput.startsWith('"""')) {
-					const lines = [];
-					if (userInput.startsWith('"""') && userInput.length > 3) {
-						// Handle case where user types """some text
-						lines.push(userInput.substring(3));
-					}
-
-					console.log(chalk.dim('(multiline mode - type """ on its own line to finish)'));
-
-					while (true) {
-						const line = await rl.question(chalk.green("| "));
-						if (line === '"""') break;
-						lines.push(line);
-					}
-					userInput = lines.join("\n");
-				}
-
-				console.log();
-
-				try {
-					await agent.chat(userInput);
-				} catch (e: any) {
-					display.error(e.message);
-				}
+			try {
+				await agent.chat(userInput);
+			} catch (e: any) {
+				renderer.render({ type: "error", message: e.message });
 			}
 		}
 	} else {
 		// Single-shot mode with queued prompts
 		if (!userMessages || userMessages.length === 0) {
-			display.error("No prompts provided");
+			console.error(chalk.red("No prompts provided"));
 			process.exit(1);
 		}
 
@@ -174,7 +128,7 @@ Current working directory: ${process.cwd()}
 					console.log(chalk.gray("─".repeat(50)));
 				}
 			} catch (e: any) {
-				display.error(e.message);
+				renderer.render({ type: "error", message: e.message });
 				// Continue with next prompt instead of exiting
 			}
 		}

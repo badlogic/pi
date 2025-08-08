@@ -5,11 +5,7 @@ import { glob } from "glob";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
 import { resolve } from "path";
-import { ConsoleRenderer } from "./renderers/console-renderer.js";
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Event-based Architecture
-// ────────────────────────────────────────────────────────────────────────────────
+import { ConsoleRenderer } from "./renderers/console-renderer";
 
 export type AgentEvent =
 	| { type: "assistant_start" }
@@ -24,10 +20,6 @@ export type AgentEvent =
 export interface AgentRenderer {
 	render(event: AgentEvent): void | Promise<void>;
 }
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Configuration Types
-// ────────────────────────────────────────────────────────────────────────────────
 
 export interface AgentConfig {
 	apiKey: string;
@@ -79,24 +71,6 @@ function logMessages(messages: any[], context: string) {
 		console.error(chalk.dim(`[log error] ${e}`));
 	}
 }
-
-// Legacy display object for backward compatibility
-// TODO: Remove once all usages are migrated to renderer
-export const display = {
-	error: (text: string) => {
-		console.error(chalk.red(`[error] ${text}\n`));
-	},
-	user: (text?: string) => {
-		if (text) {
-			console.log(chalk.green("[user]"));
-			console.log(text);
-			console.log();
-		} else {
-			console.log(chalk.green("[user]"));
-			console.log();
-		}
-	},
-};
 
 // For GPT-OSS models via responses API (vLLM format)
 export const toolsForResponses = [
@@ -470,10 +444,6 @@ export async function callChatModel(
 	}
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Agent class
-// ────────────────────────────────────────────────────────────────────────────────
-
 export class Agent {
 	private client: OpenAI;
 	private config: AgentConfig;
@@ -499,7 +469,7 @@ export class Agent {
 	async chat(userMessage: string): Promise<void> {
 		// Add user message
 		this.messages.push({ role: "user", content: userMessage });
-		logMessages(this.messages, "agent:added_user_message");
+		// logMessages(this.messages, "agent:added_user_message");
 
 		try {
 			if (this.config.isGptOss) {
@@ -508,7 +478,7 @@ export class Agent {
 				await callChatModel(this.client, this.config.model, this.messages, this.renderer);
 			}
 		} catch (e: any) {
-			logMessages(this.messages, `agent:error_${e.status || "unknown"}`);
+			// logMessages(this.messages, `agent:error_${e.status || "unknown"}`);
 			throw e;
 		}
 	}

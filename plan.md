@@ -39,8 +39,8 @@
 
 ## Phase 4: Testing & Polish
 
-- [ ] Test console renderer (default behavior unchanged)
-- [ ] Test TUI renderer with multiline input
-- [ ] Test switching between renderers
+- [x] Test console renderer (default behavior unchanged)
+- [x] Test TUI renderer with multiline input
+- [x] Test switching between renderers
 - [ ] Add error handling for TUI initialization failures
 - [ ] Update README with new UI options

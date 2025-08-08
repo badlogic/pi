@@ -1,9 +1,10 @@
 import {
-	TUI,
+	CombinedAutocompleteProvider,
 	Container,
-	TextEditor,
 	MarkdownComponent,
 	TextComponent,
+	TextEditor,
+	TUI,
 	WhitespaceComponent,
 } from "@mariozechner/tui";
 import chalk from "chalk";
@@ -20,6 +21,17 @@ export class TuiRenderer implements AgentRenderer {
 		this.ui = new TUI();
 		this.chatContainer = new Container();
 		this.editor = new TextEditor();
+
+		// Setup autocomplete for file paths and slash commands
+		const autocompleteProvider = new CombinedAutocompleteProvider(
+			[
+				{ name: "clear", description: "Clear chat history" },
+				{ name: "exit", description: "Exit the chat" },
+				{ name: "help", description: "Show available commands" },
+			],
+			process.cwd(), // Base directory for file path completion
+		);
+		this.editor.setAutocompleteProvider(autocompleteProvider);
 	}
 
 	async init(): Promise<void> {
@@ -27,10 +39,12 @@ export class TuiRenderer implements AgentRenderer {
 
 		// Add header
 		const header = new TextComponent(
-			chalk.gray("─".repeat(80)) + "\n" +
-			chalk.dim("Interactive mode. Enter to send, Shift+Enter for new line, Ctrl+C to quit.") + "\n" +
-			chalk.gray("─".repeat(80)),
-			{ bottom: 1 }
+			chalk.gray("─".repeat(80)) +
+				"\n" +
+				chalk.dim("Interactive mode. Enter to send, Shift+Enter for new line, Ctrl+C to quit.") +
+				"\n" +
+				chalk.gray("─".repeat(80)),
+			{ bottom: 1 },
 		);
 
 		// Setup UI layout
@@ -44,6 +58,37 @@ export class TuiRenderer implements AgentRenderer {
 		this.editor.onSubmit = (text: string) => {
 			text = text.trim();
 			if (!text) return;
+
+			// Handle slash commands
+			if (text.startsWith("/")) {
+				const command = text.slice(1).toLowerCase();
+
+				switch (command) {
+					case "clear":
+						this.chatContainer.clear();
+						this.ui.requestRender();
+						return;
+
+					case "exit":
+						this.stop();
+						process.exit(0);
+						return;
+
+					case "help":
+						this.chatContainer.addChild(
+							new TextComponent(
+								chalk.blue("Available commands:") +
+									"\n" +
+									"  /clear - Clear chat history\n" +
+									"  /exit  - Exit the chat\n" +
+									"  /help  - Show this help",
+								{ bottom: 1 },
+							),
+						);
+						this.ui.requestRender();
+						return;
+				}
+			}
 
 			// Show user message in chat
 			this.chatContainer.addChild(new TextComponent(chalk.green("[user]")));
@@ -68,31 +113,30 @@ export class TuiRenderer implements AgentRenderer {
 		}
 
 		switch (event.type) {
-			case 'assistant_start':
+			case "assistant_start":
 				this.chatContainer.addChild(new TextComponent(chalk.hex("#FFA500")("[assistant]")));
 				break;
 
-			case 'thinking':
+			case "thinking": {
 				// Show thinking in dim text
 				const thinkingContainer = new Container();
 				thinkingContainer.addChild(new TextComponent(chalk.dim("[thinking]")));
-				
+
 				// Split thinking text into lines for better display
-				const thinkingLines = event.text.split('\n');
+				const thinkingLines = event.text.split("\n");
 				for (const line of thinkingLines) {
 					thinkingContainer.addChild(new TextComponent(chalk.dim(line)));
 				}
 				thinkingContainer.addChild(new WhitespaceComponent(1));
 				this.chatContainer.addChild(thinkingContainer);
 				break;
+			}
 
-			case 'tool_call':
-				this.chatContainer.addChild(
-					new TextComponent(chalk.yellow(`[tool] ${event.name}(${event.args})`))
-				);
+			case "tool_call":
+				this.chatContainer.addChild(new TextComponent(chalk.yellow(`[tool] ${event.name}(${event.args})`)));
 				break;
 
-			case 'tool_result': {
+			case "tool_result": {
 				// Show tool result with truncation
 				const lines = event.result.split("\n");
 				const maxLines = 10;
@@ -101,40 +145,32 @@ export class TuiRenderer implements AgentRenderer {
 
 				const resultContainer = new Container();
 				for (const line of toShow) {
-					resultContainer.addChild(
-						new TextComponent(
-							event.isError ? chalk.red(line) : chalk.gray(line)
-						)
-					);
+					resultContainer.addChild(new TextComponent(event.isError ? chalk.red(line) : chalk.gray(line)));
 				}
-				
+
 				if (truncated) {
-					resultContainer.addChild(
-						new TextComponent(chalk.dim(`... (${lines.length - maxLines} more lines)`))
-					);
+					resultContainer.addChild(new TextComponent(chalk.dim(`... (${lines.length - maxLines} more lines)`)));
 				}
 				resultContainer.addChild(new WhitespaceComponent(1));
 				this.chatContainer.addChild(resultContainer);
 				break;
 			}
 
-			case 'assistant_message':
+			case "assistant_message":
 				// Use MarkdownComponent for rich formatting
 				this.chatContainer.addChild(new MarkdownComponent(event.text));
 				this.chatContainer.addChild(new WhitespaceComponent(1));
 				break;
 
-			case 'error':
-				this.chatContainer.addChild(
-					new TextComponent(chalk.red(`[error] ${event.message}`), { bottom: 1 })
-				);
+			case "error":
+				this.chatContainer.addChild(new TextComponent(chalk.red(`[error] ${event.message}`), { bottom: 1 }));
 				break;
 
-			case 'user_message':
+			case "user_message":
 				// User message already shown when submitted, skip here
 				break;
 
-			case 'conversation_end':
+			case "conversation_end":
 				// No special handling needed
 				break;
 		}
