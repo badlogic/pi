@@ -311,6 +311,7 @@ try {
 				}
 
 				const interactive = args.includes("-i") || args.includes("--interactive");
+				const continueSession = args.includes("-c") || args.includes("--continue");
 				const apiKey = process.env.VLLM_API_KEY;
 
 				// Collect all messages (skip model name and flags)
@@ -322,13 +323,14 @@ try {
 				}
 
 				if (!interactive && messages.length === 0) {
-					console.error('Usage: pi prompt <name> "<message>"... or pi prompt <name> -i');
+					console.error('Usage: pi prompt <name> "<message>"... or pi prompt <name> -i [-c]');
 					process.exit(1);
 				}
 
 				await promptModel(name, messages.length > 0 ? messages : undefined, {
 					pod: podOverride,
 					interactive,
+					continue: continueSession,
 					apiKey,
 				}).catch(() => {
 					// Error already handled in promptModel, just exit cleanly

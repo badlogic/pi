@@ -4,6 +4,7 @@ import type { AgentRenderer } from "./agent.js";
 import { Agent } from "./agent.js";
 import { ConsoleRenderer } from "./renderers/console-renderer.js";
 import { TuiRenderer } from "./renderers/tui-renderer.js";
+import { SessionManager } from "./session-manager.js";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Types
@@ -13,6 +14,7 @@ interface PromptOptions {
 	pod?: string;
 	interactive?: boolean;
 	apiKey?: string;
+	continue?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -71,17 +73,62 @@ Current working directory: ${process.cwd()}
 		renderer = new ConsoleRenderer();
 	}
 
-	// Create agent
-	const agent = new Agent(
-		{
-			apiKey,
-			baseURL: `http://${host}:${modelConfig.port}/v1`,
-			model: modelConfig.model,
-			isGptOss,
-			systemPrompt,
-		},
-		renderer,
-	);
+	// Create session manager
+	const sessionManager = new SessionManager(opts.continue);
+
+	// Create or resume agent
+	let agent: Agent;
+
+	if (opts.continue) {
+		const sessionData = sessionManager.loadSession();
+		if (sessionData) {
+			// Resume with existing config and messages
+			console.log(chalk.dim(`Resuming session with ${sessionData.messages.length} messages`));
+			console.log(
+				chalk.dim(
+					`Previous usage: ${sessionData.totalUsage.prompt_tokens} prompt / ${sessionData.totalUsage.completion_tokens} completion / ${sessionData.totalUsage.total_tokens} total tokens`,
+				),
+			);
+
+			// Override config with session's config but keep current API key
+			agent = new Agent(
+				{
+					...sessionData.config,
+					apiKey, // Use current API key
+				},
+				renderer,
+				sessionManager,
+			);
+			agent.setMessages(sessionData.messages);
+		} else {
+			// No session to resume, create new
+			console.log(chalk.dim("No previous session found, starting new session"));
+			agent = new Agent(
+				{
+					apiKey,
+					baseURL: `http://${host}:${modelConfig.port}/v1`,
+					model: modelConfig.model,
+					isGptOss,
+					systemPrompt,
+				},
+				renderer,
+				sessionManager,
+			);
+		}
+	} else {
+		// Create new agent with new session
+		agent = new Agent(
+			{
+				apiKey,
+				baseURL: `http://${host}:${modelConfig.port}/v1`,
+				model: modelConfig.model,
+				isGptOss,
+				systemPrompt,
+			},
+			renderer,
+			sessionManager,
+		);
+	}
 
 	// Interactive mode - always use TUI
 	if (opts.interactive && renderer instanceof TuiRenderer) {

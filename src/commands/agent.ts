@@ -1,4 +1,3 @@
-import { tool } from "ai";
 import chalk from "chalk";
 import { spawn } from "child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "fs";
@@ -7,6 +6,7 @@ import OpenAI from "openai";
 import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
 import { resolve } from "path";
 import { ConsoleRenderer } from "./renderers/console-renderer";
+import type { SessionManager } from "./session-manager";
 
 // Helper to execute commands with abort support
 async function execWithAbort(command: string, signal?: AbortSignal): Promise<string> {
@@ -360,6 +360,7 @@ export async function callModelResponses(
 	messages: any[],
 	renderer: AgentRenderer,
 	signal?: AbortSignal,
+	sessionManager?: SessionManager,
 ): Promise<void> {
 	// Show assistant label at the start
 	renderer.render({ type: "assistant_start" });
@@ -401,6 +402,12 @@ export async function callModelResponses(
 				completionTokens: usage.completion_tokens || 0,
 				totalTokens: usage.total_tokens || 0,
 			});
+			// Log usage to session
+			sessionManager?.logUsage({
+				prompt_tokens: usage.prompt_tokens || 0,
+				completion_tokens: usage.completion_tokens || 0,
+				total_tokens: usage.total_tokens || 0,
+			});
 		}
 
 		const output = response.output;
@@ -421,20 +428,24 @@ export async function callModelResponses(
 				renderer.render({ type: "tool_result", result, isError: false });
 
 				// Add tool result to messages
-				messages.push({
+				const toolResultMsg = {
 					type: "function_call_output",
 					call_id: toolCall.id,
 					output: result,
-				} as ResponseFunctionToolCallOutputItem);
-				logMessage(messages[messages.length - 1], `callGptOssModel:after_tool_${toolCall.name}_success`);
+				} as ResponseFunctionToolCallOutputItem;
+				messages.push(toolResultMsg);
+				sessionManager?.logMessage(toolResultMsg);
+				logMessage(toolResultMsg, `callGptOssModel:after_tool_${toolCall.name}_success`);
 			} catch (e: any) {
 				renderer.render({ type: "tool_result", result: e.message, isError: true });
-				messages.push({
+				const errorMsg = {
 					type: "function_call_output",
 					call_id: toolCall.id,
 					output: e.message,
-				});
-				logMessage(messages[messages.length - 1], `callGptOssModel:after_tool_${toolCall.name}_error`);
+				};
+				messages.push(errorMsg);
+				sessionManager?.logMessage(errorMsg);
+				logMessage(errorMsg, `callGptOssModel:after_tool_${toolCall.name}_error`);
 			}
 		};
 
@@ -443,9 +454,11 @@ export async function callModelResponses(
 			if (item.type === "message") {
 				const { type, ...messageWithoutType } = item;
 				messages.push(messageWithoutType);
+				sessionManager?.logMessage(messageWithoutType);
 				logMessage(messageWithoutType, `callGptOssModel:pushed_message_without_type`);
 			} else {
 				messages.push(item);
+				sessionManager?.logMessage(item);
 				logMessage(item, `callGptOssModel:pushed_${item.type}`);
 			}
 
@@ -500,6 +513,7 @@ export async function callModelChat(
 	messages: any[],
 	renderer: AgentRenderer,
 	signal?: AbortSignal,
+	sessionManager?: SessionManager,
 ): Promise<void> {
 	// Show assistant label at the start
 	renderer.render({ type: "assistant_start" });
@@ -543,6 +557,14 @@ export async function callModelChat(
 				completionTokens: response.usage.completion_tokens,
 				totalTokens: response.usage.total_tokens,
 			});
+			// Log usage to session
+			sessionManager?.logUsage({
+				prompt_tokens: response.usage.prompt_tokens,
+				completion_tokens: response.usage.completion_tokens,
+				total_tokens: response.usage.total_tokens,
+				cache_read_tokens: (response.usage as any).cache_read_input_tokens,
+				cache_write_tokens: (response.usage as any).cache_creation_input_tokens,
+			});
 		}
 
 		if (message.tool_calls && message.tool_calls.length > 0) {
@@ -553,6 +575,7 @@ export async function callModelChat(
 				tool_calls: message.tool_calls,
 			};
 			messages.push(assistantMsg);
+			sessionManager?.logMessage(assistantMsg);
 			logMessage(assistantMsg, `callChatModel:pushed_assistant_with_tools`);
 
 			// Display and execute each tool call
@@ -571,27 +594,33 @@ export async function callModelChat(
 					renderer.render({ type: "tool_result", result, isError: false });
 
 					// Add tool result to messages
-					messages.push({
+					const toolMsg = {
 						role: "tool",
 						tool_call_id: toolCall.id,
 						content: result,
-					});
-					logMessage(messages[messages.length - 1], `callChatModel:after_tool_${funcName}_success`);
+					};
+					messages.push(toolMsg);
+					sessionManager?.logMessage(toolMsg);
+					logMessage(toolMsg, `callChatModel:after_tool_${funcName}_success`);
 				} catch (e: any) {
 					renderer.render({ type: "tool_result", result: e.message, isError: true });
-					messages.push({
+					const errorMsg = {
 						role: "tool",
 						tool_call_id: toolCall.id,
 						content: e.message,
-					});
-					logMessage(messages[messages.length - 1], `callChatModel:after_tool_${funcName}_error`);
+					};
+					messages.push(errorMsg);
+					sessionManager?.logMessage(errorMsg);
+					logMessage(errorMsg, `callChatModel:after_tool_${funcName}_error`);
 				}
 			}
 		} else if (message.content) {
 			// Final assistant response
 			renderer.render({ type: "assistant_message", text: message.content });
-			messages.push({ role: "assistant", content: message.content });
-			logMessage(messages[messages.length - 1], `callChatModel:pushed_final_assistant_response`);
+			const finalMsg = { role: "assistant", content: message.content };
+			messages.push(finalMsg);
+			sessionManager?.logMessage(finalMsg);
+			logMessage(finalMsg, `callChatModel:pushed_final_assistant_response`);
 			assistantResponded = true;
 		}
 	}
@@ -607,8 +636,9 @@ export class Agent {
 	private messages: any[] = [];
 	private renderer: AgentRenderer;
 	private abortController: AbortController | null = null;
+	private sessionManager?: SessionManager;
 
-	constructor(config: AgentConfig, renderer?: AgentRenderer) {
+	constructor(config: AgentConfig, renderer?: AgentRenderer, sessionManager?: SessionManager) {
 		this.config = config;
 		this.client = new OpenAI({
 			apiKey: config.apiKey,
@@ -617,16 +647,29 @@ export class Agent {
 
 		// Use provided renderer or default to console
 		this.renderer = renderer || new ConsoleRenderer();
+		this.sessionManager = sessionManager;
 
 		// Initialize with system prompt if provided
 		if (config.systemPrompt) {
 			this.messages.push({ role: "system", content: config.systemPrompt });
+			// Log to session if this is a new session
+			if (sessionManager && this.messages.length === 1) {
+				sessionManager.logSession({
+					model: config.model,
+					baseURL: config.baseURL,
+					isGptOss: config.isGptOss,
+					systemPrompt: config.systemPrompt,
+				});
+				sessionManager.logMessage({ role: "system", content: config.systemPrompt });
+			}
 		}
 	}
 
 	async chat(userMessage: string): Promise<void> {
 		// Add user message
-		this.messages.push({ role: "user", content: userMessage });
+		const userMsg = { role: "user", content: userMessage };
+		this.messages.push(userMsg);
+		this.sessionManager?.logMessage(userMsg);
 		logMessage(userMessage, "agent:added_user_message");
 
 		// Create a new AbortController for this chat session
@@ -640,6 +683,7 @@ export class Agent {
 					this.messages,
 					this.renderer,
 					this.abortController.signal,
+					this.sessionManager,
 				);
 			} else {
 				await callModelChat(
@@ -648,6 +692,7 @@ export class Agent {
 					this.messages,
 					this.renderer,
 					this.abortController.signal,
+					this.sessionManager,
 				);
 			}
 		} catch (e: any) {
@@ -671,6 +716,10 @@ export class Agent {
 
 	getMessages(): any[] {
 		return [...this.messages];
+	}
+
+	setMessages(messages: any[]): void {
+		this.messages = [...messages];
 	}
 
 	clearMessages(): void {
