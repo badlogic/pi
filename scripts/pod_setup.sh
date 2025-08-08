@@ -161,14 +161,10 @@ source "$VENV/bin/activate"
 echo "Installing vLLM and dependencies (version: $VLLM_VERSION)..."
 case "$VLLM_VERSION" in
     release)
-        echo "Installing PyTorch (stable) and vLLM release..."
-        # Install stable PyTorch with automatic CUDA detection
-        uv pip install torch --torch-backend=auto || {
-            echo "ERROR: Failed to install PyTorch"
-            exit 1
-        }
-        # Install latest vLLM release
-        uv pip install vllm>=0.10.0 || {
+        echo "Installing vLLM release with PyTorch..."
+        # Install vLLM with automatic PyTorch backend selection
+        # vLLM will automatically install the correct PyTorch version
+        uv pip install vllm>=0.10.0 --torch-backend=auto || {
             echo "ERROR: Failed to install vLLM"
             exit 1
         }
