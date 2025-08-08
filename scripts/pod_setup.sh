@@ -130,15 +130,29 @@ if ! command -v python3.12 &> /dev/null; then
     uv python install 3.12
 fi
 
-# --- Create and activate venv ------------------------------------------------
-VENV="$HOME/venv"
+# --- Clean up existing environments and caches -------------------------------
+echo "Cleaning up existing environments and caches..."
 
-# Remove existing venv if it exists for a clean installation
+# Remove existing venv for a clean installation
+VENV="$HOME/venv"
 if [ -d "$VENV" ]; then
     echo "Removing existing virtual environment..."
     rm -rf "$VENV"
 fi
 
+# Remove uv cache to ensure fresh installs
+if [ -d "$HOME/.cache/uv" ]; then
+    echo "Clearing uv cache..."
+    rm -rf "$HOME/.cache/uv"
+fi
+
+# Remove vLLM cache to avoid conflicts
+if [ -d "$HOME/.cache/vllm" ]; then
+    echo "Clearing vLLM cache..."
+    rm -rf "$HOME/.cache/vllm"
+fi
+
+# --- Create and activate venv ------------------------------------------------
 echo "Creating fresh virtual environment..."
 uv venv --python 3.12 --seed "$VENV"
 source "$VENV/bin/activate"
