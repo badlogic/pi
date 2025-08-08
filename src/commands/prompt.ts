@@ -202,12 +202,6 @@ Current working directory: ${process.cwd()}
 					});
 				}
 			}
-
-			// Add separator
-			await renderer.render({
-				type: "assistant_message",
-				text: "---\n*Session restored. Continue the conversation...*\n",
-			});
 		}
 
 		// Set up interrupt callback
