@@ -666,6 +666,9 @@ export class Agent {
 	}
 
 	async chat(userMessage: string): Promise<void> {
+		// Render user message through the event system
+		this.renderer.render({ type: "user_message", text: userMessage });
+
 		// Add user message
 		const userMsg = { role: "user", content: userMessage };
 		this.messages.push(userMsg);

@@ -153,10 +153,8 @@ export class TuiRenderer implements AgentRenderer {
 			text = text.trim();
 			if (!text) return;
 
-			// Show user message in chat
-			this.chatContainer.addChild(new TextComponent(chalk.green("[user]")));
-			this.chatContainer.addChild(new TextComponent(text, { bottom: 1 }));
-			this.ui.requestRender();
+			// Don't show user message here - let the event system handle it
+			// This ensures consistency between live input and restored sessions
 
 			// Trigger callback if set
 			if (this.onInputCallback) {
@@ -252,7 +250,9 @@ export class TuiRenderer implements AgentRenderer {
 				break;
 
 			case "user_message":
-				// User message already shown when submitted, skip here
+				// Render user message
+				this.chatContainer.addChild(new TextComponent(chalk.green("[user]")));
+				this.chatContainer.addChild(new TextComponent(event.text, { bottom: 1 }));
 				break;
 
 			case "token_usage":
