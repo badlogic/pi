@@ -231,10 +231,21 @@ chmod +x /tmp/model_run_${name}.sh`,
 		.join("\n");
 
 	// Start the model runner with script command for pseudo-TTY (preserves colors)
+	// Note: We use script to preserve colors and create a log file
+	// setsid creates a new session so it survives SSH disconnection
 	const startCmd = `
 		${env}
 		mkdir -p ~/.vllm_logs
-		setsid script -q -f -c "/tmp/model_run_${name}.sh" ~/.vllm_logs/${name}.log </dev/null >/dev/null 2>&1 &
+		# Create a wrapper that monitors the script command
+		cat > /tmp/model_wrapper_${name}.sh << 'WRAPPER'
+#!/bin/bash
+script -q -f -c "/tmp/model_run_${name}.sh" ~/.vllm_logs/${name}.log
+exit_code=$?
+echo "Script exited with code $exit_code" >> ~/.vllm_logs/${name}.log
+exit $exit_code
+WRAPPER
+		chmod +x /tmp/model_wrapper_${name}.sh
+		setsid /tmp/model_wrapper_${name}.sh </dev/null >/dev/null 2>&1 &
 		echo $!
 		exit 0
 	`;
@@ -449,12 +460,35 @@ export const listModels = async (options: { pod?: string }) => {
 	let anyDead = false;
 	for (const name of modelNames) {
 		const model = pod.models[name];
-		const checkCmd = `ps -p ${model.pid} > /dev/null 2>&1 && echo "running" || echo "dead"`;
+		// Check both the wrapper process and if vLLM is responding
+		const checkCmd = `
+			# Check if wrapper process exists
+			if ps -p ${model.pid} > /dev/null 2>&1; then
+				# Process exists, now check if vLLM is responding
+				if curl -s -f http://localhost:${model.port}/health > /dev/null 2>&1; then
+					echo "running"
+				else
+					# Check if it's still starting up
+					if tail -n 20 ~/.vllm_logs/${name}.log 2>/dev/null | grep -q "ERROR\\|Failed\\|Cuda error\\|died"; then
+						echo "crashed"
+					else
+						echo "starting"
+					fi
+				fi
+			else
+				echo "dead"
+			fi
+		`;
 		const result = await sshExec(pod.ssh, checkCmd);
 		const status = result.stdout.trim();
 		if (status === "dead") {
 			console.log(chalk.red(`  ${name}: Process ${model.pid} is not running`));
 			anyDead = true;
+		} else if (status === "crashed") {
+			console.log(chalk.red(`  ${name}: vLLM crashed (check logs with 'pi logs ${name}')`));
+			anyDead = true;
+		} else if (status === "starting") {
+			console.log(chalk.yellow(`  ${name}: Still starting up...`));
 		}
 	}
 

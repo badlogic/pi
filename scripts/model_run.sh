@@ -8,12 +8,15 @@ NAME="{{NAME}}"
 PORT="{{PORT}}"
 VLLM_ARGS="{{VLLM_ARGS}}"
 
-# Trap to ensure cleanup on exit
+# Trap to ensure cleanup on exit and kill any child processes
 cleanup() {
-    echo "Model runner exiting with code $?"
-    exit $?
+    local exit_code=$?
+    echo "Model runner exiting with code $exit_code"
+    # Kill any child processes
+    pkill -P $$ 2>/dev/null || true
+    exit $exit_code
 }
-trap cleanup EXIT
+trap cleanup EXIT TERM INT
 
 # Force colored output even when not a TTY
 export FORCE_COLOR=1
@@ -59,13 +62,20 @@ echo "Command: $VLLM_CMD"
 echo "========================================="
 echo ""
 
-# Run vLLM (this blocks until killed)
-# Don't use exec so we can capture the exit code
-bash -c "$VLLM_CMD"
+# Run vLLM in background so we can monitor it
+echo "Starting vLLM process..."
+bash -c "$VLLM_CMD" &
+VLLM_PID=$!
+
+# Monitor the vLLM process
+echo "Monitoring vLLM process (PID: $VLLM_PID)..."
+wait $VLLM_PID
 VLLM_EXIT_CODE=$?
 
 if [ $VLLM_EXIT_CODE -ne 0 ]; then
     echo "❌ ERROR: vLLM exited with code $VLLM_EXIT_CODE" >&2
+    # Make sure to exit the script command too
+    kill -TERM $$ 2>/dev/null || true
     exit $VLLM_EXIT_CODE
 fi
 
