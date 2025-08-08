@@ -48,10 +48,6 @@ export class ConsoleRenderer implements AgentRenderer {
 				console.log(event.text);
 				console.log();
 				break;
-
-			case "conversation_end":
-				// No output for conversation end in console
-				break;
 		}
 	}
 }

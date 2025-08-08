@@ -87,10 +87,9 @@ Current working directory: ${process.cwd()}
 	if (opts.interactive && renderer instanceof TuiRenderer) {
 		await renderer.init();
 
-		// Handle Ctrl+C
-		process.on("SIGINT", () => {
-			renderer.stop();
-			process.exit(0);
+		// Set up interrupt callback
+		renderer.setInterruptCallback(() => {
+			agent.interrupt();
 		});
 
 		while (true) {

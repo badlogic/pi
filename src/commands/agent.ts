@@ -1,11 +1,64 @@
 import chalk from "chalk";
-import { execSync } from "child_process";
+import { spawn } from "child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { glob } from "glob";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
 import { resolve } from "path";
 import { ConsoleRenderer } from "./renderers/console-renderer";
+
+// Helper to execute commands with abort support
+async function execWithAbort(command: string, signal?: AbortSignal): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const child = spawn(command, {
+			shell: true,
+			signal,
+		});
+
+		let stdout = "";
+		let stderr = "";
+
+		child.stdout?.on("data", (data) => {
+			stdout += data.toString();
+		});
+
+		child.stderr?.on("data", (data) => {
+			stderr += data.toString();
+		});
+
+		child.on("error", (error) => {
+			reject(error);
+		});
+
+		child.on("close", (code) => {
+			if (signal?.aborted) {
+				reject(new Error("Interrupted"));
+			} else if (code !== 0 && code !== null) {
+				// For some commands like ripgrep, exit code 1 is normal (no matches)
+				if (code === 1 && command.includes("rg")) {
+					resolve(""); // No matches for ripgrep
+				} else if (stderr && !stdout) {
+					reject(new Error(stderr));
+				} else {
+					resolve(stdout || "");
+				}
+			} else {
+				resolve(stdout || stderr || "");
+			}
+		});
+
+		// Kill the process if signal is aborted
+		if (signal) {
+			signal.addEventListener(
+				"abort",
+				() => {
+					child.kill("SIGTERM");
+				},
+				{ once: true },
+			);
+		}
+	});
+}
 
 export type AgentEvent =
 	| { type: "assistant_start" }
@@ -15,7 +68,7 @@ export type AgentEvent =
 	| { type: "assistant_message"; text: string }
 	| { type: "error"; message: string }
 	| { type: "user_message"; text: string }
-	| { type: "conversation_end" };
+	| { type: "token_usage"; promptTokens: number; completionTokens: number; totalTokens: number };
 
 export interface AgentRenderer {
 	render(event: AgentEvent): void | Promise<void>;
@@ -165,7 +218,7 @@ export const toolsForChat = toolsForResponses.map((tool) => ({
 	},
 }));
 
-export async function executeTool(name: string, args: string): Promise<string> {
+export async function executeTool(name: string, args: string, signal?: AbortSignal): Promise<string> {
 	const parsed = JSON.parse(args);
 
 	switch (name) {
@@ -190,9 +243,12 @@ export async function executeTool(name: string, args: string): Promise<string> {
 			const command = parsed.command;
 			if (!command) return "Error: command parameter is required";
 			try {
-				const output = execSync(command, { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+				const output = await execWithAbort(command, signal);
 				return output || "Command executed successfully";
 			} catch (e: any) {
+				if (e.message === "Interrupted") {
+					throw e; // Re-throw interruption
+				}
 				throw new Error(`Command failed: ${e.message}`);
 			}
 		}
@@ -229,17 +285,11 @@ export async function executeTool(name: string, args: string): Promise<string> {
 			const cmd = `rg ${args} < /dev/null`;
 
 			try {
-				const output = execSync(cmd, {
-					encoding: "utf8",
-					maxBuffer: 10 * 1024 * 1024,
-					cwd: process.cwd(),
-					shell: "/bin/sh", // Need shell to handle the redirect
-				});
+				const output = await execWithAbort(cmd, signal);
 				return output.trim() || "No matches found";
 			} catch (e: any) {
-				// ripgrep returns exit code 1 when no matches found
-				if (e.status === 1) {
-					return "No matches found";
+				if (e.message === "Interrupted") {
+					throw e; // Re-throw interruption
 				}
 				return `ripgrep error: ${e.message}`;
 			}
@@ -250,11 +300,12 @@ export async function executeTool(name: string, args: string): Promise<string> {
 	}
 }
 
-export async function callGptOssModel(
+export async function callModelResponses(
 	client: OpenAI,
 	model: string,
 	messages: any[],
 	renderer: AgentRenderer,
+	signal?: AbortSignal,
 ): Promise<void> {
 	// Show assistant label at the start
 	renderer.render({ type: "assistant_start" });
@@ -266,16 +317,35 @@ export async function callGptOssModel(
 	const maxRounds = 10000;
 
 	for (let round = 0; round < maxRounds && !conversationDone; round++) {
+		// Check if we've been interrupted
+		if (signal?.aborted) {
+			throw new Error("Interrupted");
+		}
+
 		// Log before API call
 		logMessages(messages, `callGptOssModel:before_api_round_${round}`);
 
-		const response = await client.responses.create({
-			model,
-			input: messages,
-			tools: toolsForResponses,
-			tool_choice: "auto",
-			max_output_tokens: 2000,
-		} as any);
+		const response = await client.responses.create(
+			{
+				model,
+				input: messages,
+				tools: toolsForResponses,
+				tool_choice: "auto",
+				max_output_tokens: 2000,
+			} as any,
+			{ signal },
+		);
+
+		// Report token usage if available (responses API format)
+		if ((response as any).usage) {
+			const usage = (response as any).usage;
+			renderer.render({
+				type: "token_usage",
+				promptTokens: usage.prompt_tokens || 0,
+				completionTokens: usage.completion_tokens || 0,
+				totalTokens: usage.total_tokens || 0,
+			});
+		}
 
 		const output = response.output;
 		if (!output) break;
@@ -284,9 +354,14 @@ export async function callGptOssModel(
 		const toolCalls: any[] = [];
 
 		const executeToolCall = async (toolCall: ToolCall) => {
+			// Check if interrupted before executing tool
+			if (signal?.aborted) {
+				throw new Error("Interrupted");
+			}
+
 			try {
 				renderer.render({ type: "tool_call", name: toolCall.name, args: toolCall.arguments });
-				const result = await executeTool(toolCall.name, toolCall.arguments);
+				const result = await executeTool(toolCall.name, toolCall.arguments, signal);
 				renderer.render({ type: "tool_result", result, isError: false });
 
 				// Add tool result to messages
@@ -363,11 +438,12 @@ export async function callGptOssModel(
 	}
 }
 
-export async function callChatModel(
+export async function callModelChat(
 	client: OpenAI,
 	model: string,
 	messages: any[],
 	renderer: AgentRenderer,
+	signal?: AbortSignal,
 ): Promise<void> {
 	// Show assistant label at the start
 	renderer.render({ type: "assistant_start" });
@@ -379,19 +455,37 @@ export async function callChatModel(
 	let assistantResponded = false;
 
 	for (let round = 0; round < maxRounds && !assistantResponded; round++) {
+		// Check if we've been interrupted
+		if (signal?.aborted) {
+			throw new Error("Interrupted");
+		}
+
 		// Log before API call
 		logMessages(messages, `callChatModel:before_api_round_${round}`);
 
-		const response = await client.chat.completions.create({
-			model,
-			messages,
-			tools: toolsForChat as any,
-			tool_choice: "auto",
-			temperature: 0.7,
-			max_tokens: 2000,
-		});
+		const response = await client.chat.completions.create(
+			{
+				model,
+				messages,
+				tools: toolsForChat as any,
+				tool_choice: "auto",
+				temperature: 0.7,
+				max_tokens: 2000,
+			},
+			{ signal },
+		);
 
 		const message = response.choices[0].message;
+
+		// Report token usage if available
+		if (response.usage) {
+			renderer.render({
+				type: "token_usage",
+				promptTokens: response.usage.prompt_tokens,
+				completionTokens: response.usage.completion_tokens,
+				totalTokens: response.usage.total_tokens,
+			});
+		}
 
 		if (message.tool_calls && message.tool_calls.length > 0) {
 			// Add assistant message with tool calls to history
@@ -405,12 +499,17 @@ export async function callChatModel(
 
 			// Display and execute each tool call
 			for (const toolCall of message.tool_calls) {
+				// Check if interrupted before executing tool
+				if (signal?.aborted) {
+					throw new Error("Interrupted");
+				}
+
 				const funcName = toolCall.type === "function" ? toolCall.function.name : toolCall.custom.name;
 				const funcArgs = toolCall.type === "function" ? toolCall.function.arguments : toolCall.custom.input;
 				renderer.render({ type: "tool_call", name: funcName, args: funcArgs });
 
 				try {
-					const result = await executeTool(funcName, funcArgs);
+					const result = await executeTool(funcName, funcArgs, signal);
 					renderer.render({ type: "tool_result", result, isError: false });
 
 					// Add tool result to messages
@@ -449,6 +548,7 @@ export class Agent {
 	private config: AgentConfig;
 	private messages: any[] = [];
 	private renderer: AgentRenderer;
+	private abortController: AbortController | null = null;
 
 	constructor(config: AgentConfig, renderer?: AgentRenderer) {
 		this.config = config;
@@ -471,15 +571,43 @@ export class Agent {
 		this.messages.push({ role: "user", content: userMessage });
 		// logMessages(this.messages, "agent:added_user_message");
 
+		// Create a new AbortController for this chat session
+		this.abortController = new AbortController();
+
 		try {
 			if (this.config.isGptOss) {
-				await callGptOssModel(this.client, this.config.model, this.messages, this.renderer);
+				await callModelResponses(
+					this.client,
+					this.config.model,
+					this.messages,
+					this.renderer,
+					this.abortController.signal,
+				);
 			} else {
-				await callChatModel(this.client, this.config.model, this.messages, this.renderer);
+				await callModelChat(
+					this.client,
+					this.config.model,
+					this.messages,
+					this.renderer,
+					this.abortController.signal,
+				);
 			}
 		} catch (e: any) {
+			// Check if this was an interruption
+			if (e.message === "Interrupted" || this.abortController.signal.aborted) {
+				// Don't show another message - TUI already shows it
+				return;
+			}
 			// logMessages(this.messages, `agent:error_${e.status || "unknown"}`);
 			throw e;
+		} finally {
+			this.abortController = null;
+		}
+	}
+
+	interrupt(): void {
+		if (this.abortController) {
+			this.abortController.abort();
 		}
 	}
 
