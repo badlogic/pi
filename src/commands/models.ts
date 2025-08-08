@@ -348,16 +348,20 @@ WRAPPER
     -d '{"model":"${modelId}","messages":[{"role":"user","content":"Hi"}]}'`),
 		);
 		console.log("");
-		console.log(chalk.cyan(`Monitor logs:  pi logs ${name}`));
-		console.log(chalk.cyan(`Stop model:    pi stop ${name}`));
+		console.log(chalk.cyan(`Chat with model:  pi agent ${name} "Your message"`));
+		console.log(chalk.cyan(`Interactive mode: pi agent ${name} -i`));
+		console.log(chalk.cyan(`Monitor logs:     pi logs ${name}`));
+		console.log(chalk.cyan(`Stop model:       pi stop ${name}`));
 	} else if (interrupted) {
 		console.log(chalk.yellow("\n\nStopped monitoring. Model deployment continues in background."));
-		console.log(chalk.cyan(`Check status with: pi logs ${name}`));
-		console.log(chalk.cyan(`Stop model with: pi stop ${name}`));
+		console.log(chalk.cyan(`Chat with model: pi agent ${name} "Your message"`));
+		console.log(chalk.cyan(`Check status: pi logs ${name}`));
+		console.log(chalk.cyan(`Stop model: pi stop ${name}`));
 	} else {
 		console.log(chalk.yellow("\n\nLog stream ended. Model may still be running."));
-		console.log(chalk.cyan(`Check status with: pi logs ${name}`));
-		console.log(chalk.cyan(`Stop model with: pi stop ${name}`));
+		console.log(chalk.cyan(`Chat with model: pi agent ${name} "Your message"`));
+		console.log(chalk.cyan(`Check status: pi logs ${name}`));
+		console.log(chalk.cyan(`Stop model: pi stop ${name}`));
 	}
 };
 

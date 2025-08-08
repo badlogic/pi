@@ -531,7 +531,7 @@ Examples:
 	// Create renderer based on whether we have a message
 	const isInteractive = !message;
 	const renderer = isInteractive ? new TuiRenderer() : new ConsoleRenderer();
-	
+
 	// Show configuration in interactive mode
 	if (isInteractive) {
 		console.log(`Using: ${baseURL} with model ${model}`);
