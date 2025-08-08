@@ -78,6 +78,8 @@ Current working directory: ${process.cwd()}
 
 	// Create or resume agent
 	let agent: Agent;
+	let hasRestoredSession = false;
+	let restoredMessages: any[] = [];
 
 	if (opts.continue) {
 		const sessionData = sessionManager.loadSession();
@@ -100,6 +102,8 @@ Current working directory: ${process.cwd()}
 				sessionManager,
 			);
 			agent.setMessages(sessionData.messages);
+			hasRestoredSession = true;
+			restoredMessages = sessionData.messages;
 		} else {
 			// No session to resume, create new
 			console.log(chalk.dim("No previous session found, starting new session"));
@@ -133,6 +137,78 @@ Current working directory: ${process.cwd()}
 	// Interactive mode - always use TUI
 	if (opts.interactive && renderer instanceof TuiRenderer) {
 		await renderer.init();
+
+		// Render restored session history if continuing
+		if (hasRestoredSession && restoredMessages.length > 0) {
+			// Render previous messages (skip system prompt)
+			for (const msg of restoredMessages) {
+				if (msg.role === "system") continue;
+
+				if (msg.role === "user") {
+					await renderer.render({ type: "user_message", text: msg.content });
+				} else if (msg.role === "assistant") {
+					// Render assistant response
+					if (msg.content) {
+						await renderer.render({ type: "assistant_start" });
+						await renderer.render({ type: "assistant_message", text: msg.content });
+					}
+				} else if (msg.role === "tool") {
+					// Tool result message
+					await renderer.render({
+						type: "tool_result",
+						result: msg.content || "",
+						isError: false,
+					});
+				} else if (msg.tool_calls) {
+					// Assistant message with tool calls
+					await renderer.render({ type: "assistant_start" });
+					for (const toolCall of msg.tool_calls) {
+						const funcName = toolCall.type === "function" ? toolCall.function.name : toolCall.custom?.name;
+						const funcArgs = toolCall.type === "function" ? toolCall.function.arguments : toolCall.custom?.input;
+						await renderer.render({
+							type: "tool_call",
+							name: funcName || "unknown",
+							args: funcArgs || "{}",
+						});
+					}
+				} else if (msg.type === "reasoning") {
+					// Reasoning/thinking message (for GPT-OSS)
+					for (const content of msg.content || []) {
+						if (content.type === "reasoning_text") {
+							await renderer.render({ type: "thinking", text: content.text });
+						}
+					}
+				} else if (msg.type === "message") {
+					// Regular message (for GPT-OSS)
+					await renderer.render({ type: "assistant_start" });
+					for (const content of msg.content || []) {
+						if (content.type === "output_text") {
+							await renderer.render({ type: "assistant_message", text: content.text });
+						}
+					}
+				} else if (msg.type === "function_call") {
+					// Function call (for GPT-OSS)
+					await renderer.render({
+						type: "tool_call",
+						name: msg.name || "unknown",
+						args: msg.arguments || "{}",
+					});
+				} else if (msg.type === "function_call_output") {
+					// Function output (for GPT-OSS)
+					await renderer.render({
+						type: "tool_result",
+						result: msg.output || "",
+						isError: false,
+					});
+				}
+			}
+
+			// Add separator
+			await renderer.render({
+				type: "assistant_message",
+				text: "---\n*Session restored. Continue the conversation...*\n",
+			});
+		}
 
 		// Set up interrupt callback
 		renderer.setInterruptCallback(() => {
