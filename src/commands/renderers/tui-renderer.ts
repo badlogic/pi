@@ -313,6 +313,13 @@ export class TuiRenderer implements AgentRenderer {
 		}, 500);
 	}
 
+	renderAssistantLabel(): void {
+		// Just render the assistant label without starting animations
+		// Used for restored session history
+		this.chatContainer.addChild(new TextComponent(chalk.hex("#FFA500")("[assistant]")));
+		this.ui.requestRender();
+	}
+
 	stop(): void {
 		if (this.currentLoadingAnimation) {
 			this.currentLoadingAnimation.stop();

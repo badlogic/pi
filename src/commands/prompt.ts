@@ -148,7 +148,8 @@ Current working directory: ${process.cwd()}
 					await renderer.render({ type: "user_message", text: msg.content });
 				} else if (msg.role === "assistant") {
 					// Assistant messages can have content, tool_calls, or both
-					await renderer.render({ type: "assistant_start" });
+					// For restored messages, just show the label without animations
+					renderer.renderAssistantLabel();
 
 					// Render tool calls if present
 					if (msg.tool_calls && msg.tool_calls.length > 0) {
@@ -184,7 +185,8 @@ Current working directory: ${process.cwd()}
 					}
 				} else if (msg.type === "message") {
 					// Regular message (for GPT-OSS)
-					await renderer.render({ type: "assistant_start" });
+					// For restored messages, just show the label without animations
+					renderer.renderAssistantLabel();
 					for (const content of msg.content || []) {
 						if (content.type === "output_text") {
 							await renderer.render({ type: "assistant_message", text: content.text });
