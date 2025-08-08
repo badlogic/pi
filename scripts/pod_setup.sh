@@ -187,7 +187,7 @@ case "$VLLM_VERSION" in
         
         # Install build dependencies
         echo "Installing build dependencies..."
-        uv pip install ninja packaging setuptools wheel -v || {
+        uv pip install ninja packaging setuptools setuptools-scm wheel -v || {
             echo "ERROR: Failed to install build dependencies"
             exit 1
         }
