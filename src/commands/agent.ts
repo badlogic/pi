@@ -1,3 +1,4 @@
+import { tool } from "ai";
 import chalk from "chalk";
 import { spawn } from "child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "fs";
@@ -106,6 +107,75 @@ function logMessage(message: any, context: string) {
 	} catch (e) {
 		// Silently fail logging - don't interrupt the main flow
 		console.error(chalk.dim(`[log error] ${e}`));
+	}
+}
+
+// Reconstruct messages array from JSONL log file
+export function reconstructMessagesFromLog(): {
+	messages: any[];
+	sessions: Array<{ startTime: string; messages: any[] }>;
+} {
+	try {
+		const logFile = "prompts.jsonl";
+		if (!existsSync(logFile)) {
+			return { messages: [], sessions: [] };
+		}
+
+		const content = readFileSync(logFile, "utf8");
+		const lines = content
+			.trim()
+			.split("\n")
+			.filter((line) => line);
+
+		const sessions: Array<{ startTime: string; messages: any[] }> = [];
+		let currentSession: any[] = [];
+		let sessionStartTime: string | null = null;
+
+		for (const line of lines) {
+			try {
+				const entry = JSON.parse(line);
+
+				// Start new session on initial context
+				if (entry.context.includes("initial")) {
+					if (currentSession.length > 0 && sessionStartTime) {
+						sessions.push({ startTime: sessionStartTime, messages: [...currentSession] });
+					}
+					currentSession = [];
+					sessionStartTime = entry.timestamp;
+
+					// For initial messages, we log each message individually
+					if (entry.message && typeof entry.message === "object") {
+						currentSession.push(entry.message);
+					}
+				} else if (entry.context.includes("pushed") || entry.context.includes("after_tool")) {
+					// These contexts indicate a new message was added
+					if (entry.message && typeof entry.message === "object") {
+						currentSession.push(entry.message);
+					}
+				} else if (entry.context === "agent:added_user_message") {
+					// User message - convert string to message object
+					currentSession.push({ role: "user", content: entry.message });
+				}
+			} catch (e) {
+				// Skip malformed lines
+				console.error(chalk.dim(`[log parse error] ${e}`));
+			}
+		}
+
+		// Add final session if exists
+		if (currentSession.length > 0 && sessionStartTime) {
+			sessions.push({ startTime: sessionStartTime, messages: currentSession });
+		}
+
+		// Return the last session's messages as the current messages array
+		const lastSession = sessions[sessions.length - 1];
+		return {
+			messages: lastSession ? lastSession.messages : [],
+			sessions,
+		};
+	} catch (e) {
+		console.error(chalk.dim(`[log read error] ${e}`));
+		return { messages: [], sessions: [] };
 	}
 }
 
