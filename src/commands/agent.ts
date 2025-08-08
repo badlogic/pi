@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { spawn } from "child_process";
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "fs";
+import { appendFileSync, closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "fs";
 import { glob } from "glob";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCallOutputItem } from "openai/resources/responses/responses.mjs";
@@ -18,13 +18,31 @@ async function execWithAbort(command: string, signal?: AbortSignal): Promise<str
 
 		let stdout = "";
 		let stderr = "";
+		const MAX_OUTPUT_SIZE = 1024 * 1024; // 1MB limit
+		let outputTruncated = false;
 
 		child.stdout?.on("data", (data) => {
-			stdout += data.toString();
+			const chunk = data.toString();
+			if (stdout.length + chunk.length > MAX_OUTPUT_SIZE) {
+				if (!outputTruncated) {
+					stdout += "\n... [Output truncated - exceeded 1MB limit] ...";
+					outputTruncated = true;
+				}
+			} else {
+				stdout += chunk;
+			}
 		});
 
 		child.stderr?.on("data", (data) => {
-			stderr += data.toString();
+			const chunk = data.toString();
+			if (stderr.length + chunk.length > MAX_OUTPUT_SIZE) {
+				if (!outputTruncated) {
+					stderr += "\n... [Output truncated - exceeded 1MB limit] ...";
+					outputTruncated = true;
+				}
+			} else {
+				stderr += chunk;
+			}
 		});
 
 		child.on("error", (error) => {
@@ -282,6 +300,19 @@ export async function executeTool(name: string, args: string, signal?: AbortSign
 			if (!path) return "Error: path parameter is required";
 			const file = resolve(path);
 			if (!existsSync(file)) return `File not found: ${file}`;
+
+			// Check file size before reading
+			const stats = statSync(file);
+			const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
+			if (stats.size > MAX_FILE_SIZE) {
+				// Read only the first 1MB
+				const fd = openSync(file, "r");
+				const buffer = Buffer.alloc(MAX_FILE_SIZE);
+				readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
+				closeSync(fd);
+				return buffer.toString("utf8") + "\n\n... [File truncated - exceeded 1MB limit] ...";
+			}
+
 			const data = readFileSync(file, "utf8");
 			return data;
 		}
