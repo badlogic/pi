@@ -75,9 +75,12 @@ pi-agent --json "What is 2+2?"
 pi-agent --json
 # Now send commands via stdin
 
-# Or pipe multiple messages
+# Or pipe multiple messages (exits after processing)
 echo '{"type": "message", "content": "What is 2+2?"}
 {"type": "message", "content": "What about 3+3?"}' | pi-agent --json
+
+# Keep interactive after initial messages
+(echo '{"type": "message", "content": "What is 2+2?"}'; cat) | pi-agent --json
 ```
 
 Commands you can send via stdin in interactive JSON mode:
