@@ -171,9 +171,12 @@ async function runTuiInteractiveMode(agentConfig: AgentConfig, sessionManager: S
 	renderer.setInterruptCallback(() => {
 		agent.interrupt();
 	});
+
+	// Initialize TUI once, before any events
+	await renderer.init();
+
 	if (sessionData) {
 		agent.setEvents(sessionData ? sessionData.events.map((e) => e.event) : []);
-		await renderer.init();
 		for (const sessionEvent of sessionData.events) {
 			const event = sessionEvent.event;
 			if (event.type === "assistant_start") {
