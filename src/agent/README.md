@@ -1,6 +1,12 @@
 # pi-agent
 
-Standalone OpenAI-compatible agent with tool calling and session persistence.
+A general-purpose agent with tool calling and session persistence, modeled after Claude Code but extremely hackable and minimal. It comes with a built-in TUI (also modeled after Claude Code) for interactive use. 
+
+Everything is designed to be easy:
+- Writing custom UIs on top of it (via JSON mode)
+- Using it for inference steps in deterministic programs
+- Providing your own system prompts and tools
+- Working with various LLM providers or self-hosted LLMs
 
 ## Installation
 
@@ -30,11 +36,11 @@ pi-agent --continue "Follow up question"
 # GPT-OSS via Groq
 pi-agent --base-url https://api.groq.com/openai/v1 --api-key $GROQ_API_KEY --model openai/gpt-oss-120b
 
-# DeepSeek V3 via OpenRouter
-pi-agent --base-url https://openrouter.ai/api/v1 --api-key $OPENROUTER_API_KEY --model deepseek/deepseek-chat-v3-0324:free
+# GLM 4.5 via OpenRouter
+pi-agent --base-url https://openrouter.ai/api/v1 --api-key $OPENROUTER_API_KEY --model z-ai/glm-4.5
 
 # Claude via Anthropic (no prompt caching support - see https://docs.anthropic.com/en/api/openai-sdk)
-pi-agent --base-url https://api.anthropic.com/v1 --api-key $ANTHROPIC_API_KEY --model claude-3-5-sonnet-20241022
+pi-agent --base-url https://api.anthropic.com/v1 --api-key $ANTHROPIC_API_KEY --model claude-opus-4-1-20250805
 ```
 
 ## Usage Modes
