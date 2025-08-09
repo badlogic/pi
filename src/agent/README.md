@@ -32,6 +32,9 @@ pi-agent --base-url https://api.groq.com/openai/v1 --api-key $GROQ_API_KEY --mod
 
 # DeepSeek V3 via OpenRouter
 pi-agent --base-url https://openrouter.ai/api/v1 --api-key $OPENROUTER_API_KEY --model deepseek/deepseek-chat-v3-0324:free
+
+# Claude via Anthropic (no prompt caching support - see https://docs.anthropic.com/en/api/openai-sdk)
+pi-agent --base-url https://api.anthropic.com/v1 --api-key $ANTHROPIC_API_KEY --model claude-3-5-sonnet-20241022
 ```
 
 ## Usage Modes
