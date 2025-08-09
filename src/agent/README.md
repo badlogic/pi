@@ -92,39 +92,6 @@ Commands you can send via stdin in interactive JSON mode:
 ### Environment Variables
 - `OPENAI_API_KEY` - OpenAI API key (used if --api-key not provided)
 
-## Examples
-
-### Use with OpenAI
-```bash
-export OPENAI_API_KEY=sk-...
-pi-agent "Explain quantum computing"
-```
-
-### Use with Local vLLM
-```bash
-pi-agent --base-url http://localhost:8000/v1 \
-         --model meta-llama/Llama-3.1-8B-Instruct \
-         --api-key dummy \
-         "what's 2+2?"
-```
-
-### Output as JSON
-```bash
-# Single message with JSON output
-pi-agent --json "What's the weather like?"
-
-# Pipe JSON events to another program
-pi-agent --json "Calculate 42 * 17" | jq '.type'
-```
-
-### Use with Claude/Anthropic
-```bash
-pi-agent --base-url https://api.anthropic.com/v1 \
-         --api-key $ANTHROPIC_API_KEY \
-         --model claude-opus-4-1-20250805 \
-         "What is consciousness?"
-```
-
 ## Session Persistence
 
 Sessions are automatically saved to `~/.pi/sessions/` and include:
