@@ -24,7 +24,7 @@ pi-agent "What is 2+2?" "What about 3+3?"
 # Interactive chat mode (no messages = interactive)
 pi-agent
 
-# Continue previous session
+# Continue most recently modified session in current directory
 pi-agent --continue "Follow up question"
 
 # GPT-OSS via Groq
