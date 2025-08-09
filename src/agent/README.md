@@ -286,10 +286,9 @@ console.log('Pi Agent Interactive Chat');
 
 The agent is built with:
 - **agent.ts** - Core Agent class and API functions
-- **cli.ts** - CLI entry point and argument parsing
+- **cli.ts** - CLI entry point, argument parsing, and JSON mode handler
 - **args.ts** - Custom typed argument parser
 - **session-manager.ts** - Session persistence
-- **json-interactive.ts** - JSON command handler
 - **tools/** - Tool implementations
 - **renderers/** - Output formatters (console, TUI, JSON)
 

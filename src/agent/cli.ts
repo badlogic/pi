@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createInterface } from "readline";
 import type { AgentEventReceiver } from "./agent.js";
 import { Agent } from "./agent.js";
 import { parseArgs, printHelp } from "./args.js";
@@ -199,9 +200,78 @@ Examples:
 		// Interactive mode
 		if (jsonOutput) {
 			// JSON interactive mode - read commands from stdin
-			const { JsonInteractive } = await import("./json-interactive.js");
-			const jsonHandler = new JsonInteractive(agent, renderer);
-			await jsonHandler.start();
+			interface JsonCommand {
+				type: "message" | "interrupt";
+				content?: string;
+			}
+
+			const rl = createInterface({
+				input: process.stdin,
+				output: process.stdout,
+				terminal: false, // Don't interpret control characters
+			});
+
+			let isProcessing = false;
+			let pendingMessage: string | null = null;
+
+			const processMessage = async (content: string): Promise<void> => {
+				isProcessing = true;
+
+				try {
+					await agent.ask(content);
+				} catch (e: any) {
+					await renderer.on({ type: "error", message: e.message });
+				} finally {
+					isProcessing = false;
+
+					// Process any pending message
+					if (pendingMessage) {
+						const msg = pendingMessage;
+						pendingMessage = null;
+						await processMessage(msg);
+					}
+				}
+			};
+
+			// Listen for lines from stdin
+			rl.on("line", (line) => {
+				try {
+					const command = JSON.parse(line) as JsonCommand;
+
+					switch (command.type) {
+						case "interrupt":
+							agent.interrupt();
+							isProcessing = false;
+							break;
+
+						case "message":
+							if (!command.content) {
+								renderer.on({ type: "error", message: "Message content is required" });
+								return;
+							}
+
+							if (isProcessing) {
+								// Queue the message for when the agent is done
+								pendingMessage = command.content;
+							} else {
+								processMessage(command.content);
+							}
+							break;
+
+						default:
+							renderer.on({ type: "error", message: `Unknown command type: ${(command as any).type}` });
+					}
+				} catch (e) {
+					renderer.on({ type: "error", message: `Invalid JSON: ${e}` });
+				}
+			});
+
+			// Wait for stdin to close
+			await new Promise<void>((resolve) => {
+				rl.on("close", () => {
+					resolve();
+				});
+			});
 		} else {
 			// Interactive mode with TUI
 			const tui = renderer as InstanceType<typeof TuiRenderer>;
