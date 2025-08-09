@@ -167,13 +167,14 @@ async function runTuiInteractiveMode(agentConfig: AgentConfig, sessionManager: S
 		console.log(chalk.dim(`Resuming session with ${sessionData.events.length} events`));
 	}
 	const renderer = new TuiRenderer();
+
+	// Initialize TUI BEFORE creating the agent to prevent double init
+	await renderer.init();
+
 	const agent = new Agent(agentConfig, renderer, sessionManager);
 	renderer.setInterruptCallback(() => {
 		agent.interrupt();
 	});
-
-	// Initialize TUI once, before any events
-	await renderer.init();
 
 	if (sessionData) {
 		agent.setEvents(sessionData ? sessionData.events.map((e) => e.event) : []);
