@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import chalk from "chalk";
 import { createInterface } from "readline";
+import { json } from "stream/consumers";
 import type { AgentConfig, AgentEventReceiver } from "./agent.js";
 import { Agent } from "./agent.js";
 import { parseArgs, printHelp as printHelpArgs } from "./args.js";
@@ -202,12 +203,15 @@ async function runSingleShotMode(
 	agentConfig: AgentConfig,
 	sessionManager: SessionManager,
 	messages: string[],
+	jsonOutput: boolean,
 ): Promise<void> {
 	const sessionData = sessionManager.getSessionData();
-	const renderer = new ConsoleRenderer();
-	const agent = new Agent(agentConfig, renderer);
+	const renderer = jsonOutput ? new JsonRenderer() : new ConsoleRenderer();
+	const agent = new Agent(agentConfig, renderer, sessionManager);
 	if (sessionData) {
-		console.log(chalk.dim(`Resuming session with ${sessionData.events.length} events`));
+		if (!jsonOutput) {
+			console.log(chalk.dim(`Resuming session with ${sessionData.events.length} events`));
+		}
 		agent.setEvents(sessionData ? sessionData.events.map((e) => e.event) : []);
 	}
 
@@ -278,7 +282,7 @@ export async function main(args: string[]): Promise<void> {
 			await runTuiInteractiveMode(agentConfig, sessionManager);
 		}
 	} else {
-		await runSingleShotMode(agentConfig, sessionManager, messages);
+		await runSingleShotMode(agentConfig, sessionManager, messages, jsonOutput);
 	}
 }
 
