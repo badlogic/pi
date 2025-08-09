@@ -65,8 +65,8 @@ JSON mode enables programmatic integration by outputting events as JSONL (JSON L
 
 **Single-shot mode:** Outputs a stream of JSON events for each message, then exits.
 ```bash
-pi-agent --json "What is 2+2?"
-# Outputs: {"type":"session_start",...} {"type":"user_message",...} {"type":"assistant_message",...} etc.
+pi-agent --json "What is 2+2?" "And the meaning of life?"
+# Outputs: {"type":"session_start","sessionId":"bb6f0acb-80cf-4729-9593-bcf804431a53","model":"gpt-5-mini","api":"completions","baseURL":"https://api.openai.com/v1","systemPrompt":"You are a helpful assistant."} {"type":"user_message","text":"What is 2+2?"} {"type":"assistant_start"} {"type":"token_usage","inputTokens":314,"outputTokens":16,"totalTokens":330,"cacheReadTokens":0,"cacheWriteTokens":0} {"type":"assistant_message","text":"2 + 2 = 4"} {"type":"user_message","text":"And the meaning of life?"} {"type":"assistant_start"} {"type":"token_usage","inputTokens":337,"outputTokens":331,"totalTokens":668,"cacheReadTokens":0,"cacheWriteTokens":0} {"type":"assistant_message","text":"Short answer (pop-culture): 42.\n\nMore useful answers:\n- Philosophical...
 ```
 
 **Interactive mode:** Accepts JSON commands via stdin and outputs JSON events to stdout.
@@ -75,12 +75,9 @@ pi-agent --json "What is 2+2?"
 pi-agent --json
 # Now send commands via stdin
 
-# Or pipe multiple messages (exits after processing)
-echo '{"type": "message", "content": "What is 2+2?"}
-{"type": "message", "content": "What about 3+3?"}' | pi-agent --json
-
-# Keep interactive after initial messages
+# Pipe one or more initial messages in
 (echo '{"type": "message", "content": "What is 2+2?"}'; cat) | pi-agent --json
+# Outputs: {"type":"session_start","sessionId":"bb64cfbe-dd52-4662-bd4a-0d921c332fd1","model":"gpt-5-mini","api":"completions","baseURL":"https://api.openai.com/v1","systemPrompt":"You are a helpful assistant."} {"type":"user_message","text":"What is 2+2?"} {"type":"assistant_start"} {"type":"token_usage","inputTokens":314,"outputTokens":16,"totalTokens":330,"cacheReadTokens":0,"cacheWriteTokens":0} {"type":"assistant_message","text":"2 + 2 = 4"}
 ```
 
 Commands you can send via stdin in interactive JSON mode:
