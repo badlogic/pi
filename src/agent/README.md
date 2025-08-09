@@ -12,8 +12,10 @@ This installs both `pi` and `pi-agent` commands.
 
 ## Quick Start
 
+By default, pi-agent uses OpenAI's API with model `gpt-5-mini` and authenticates using the `OPENAI_API_KEY` environment variable. Any OpenAI-compatible endpoint works, including Ollama, vLLM, OpenRouter, Groq, and even Anthropic.
+
 ```bash
-# Single message (uses OPENAI_API_KEY from environment)
+# Single message
 pi-agent "What is 2+2?"
 
 # Multiple messages processed sequentially
@@ -24,6 +26,12 @@ pi-agent
 
 # Continue previous session
 pi-agent --continue "Follow up question"
+
+# GPT-OSS via Groq
+pi-agent --base-url https://api.groq.com/openai/v1 --api-key $GROQ_API_KEY --model openai/gpt-oss-120b
+
+# DeepSeek V3 via OpenRouter
+pi-agent --base-url https://openrouter.ai/api/v1 --api-key $OPENROUTER_API_KEY --model deepseek/deepseek-chat-v3-0324:free
 ```
 
 ## Usage Modes
@@ -44,18 +52,25 @@ pi-agent
 - Press Escape to interrupt while processing
 
 ### JSON Mode
-Output events as JSONL for programmatic integration:
-```bash
-# Single message with JSON output
-pi-agent --json "What is 2+2?"
+JSON mode enables programmatic integration by outputting events as JSONL (JSON Lines).
 
-# Interactive JSON mode - accepts commands via stdin
-echo '{"type": "message", "content": "Hello"}' | pi-agent --json
+**Single-shot mode:** Outputs a stream of JSON events for each message, then exits.
+```bash
+pi-agent --json "What is 2+2?"
+# Outputs: {"type":"session_start",...} {"type":"user_message",...} {"type":"assistant_message",...} etc.
 ```
 
-JSON commands:
-- `{"type": "message", "content": "..."}` - Send a message
-- `{"type": "interrupt"}` - Interrupt current processing
+**Interactive mode:** Accepts JSON commands via stdin and outputs JSON events to stdout.
+```bash
+pi-agent --json
+# Now send commands via stdin
+```
+
+Commands you can send via stdin in interactive JSON mode:
+```json
+{"type": "message", "content": "Your message here"}  // Send a message to the agent
+{"type": "interrupt"}                                 // Interrupt current processing
+```
 
 ## Configuration
 
@@ -67,7 +82,7 @@ JSON commands:
 --api <type>            API type: "completions" or "responses" (default: completions)
 --system-prompt <text>  System prompt (default: "You are a helpful assistant.")
 --continue              Continue previous session
---json                  Output as JSONL
+--json                  JSON mode
 --help, -h              Show help message
 ```
 
@@ -87,40 +102,24 @@ pi-agent "Explain quantum computing"
 pi-agent --base-url http://localhost:8000/v1 \
          --model meta-llama/Llama-3.1-8B-Instruct \
          --api-key dummy \
-         "Hello"
+         "what's 2+2?"
+```
+
+### Output as JSON
+```bash
+# Single message with JSON output
+pi-agent --json "What's the weather like?"
+
+# Pipe JSON events to another program
+pi-agent --json "Calculate 42 * 17" | jq '.type'
 ```
 
 ### Use with Claude/Anthropic
 ```bash
 pi-agent --base-url https://api.anthropic.com/v1 \
          --api-key $ANTHROPIC_API_KEY \
-         --model claude-3-opus-20240229 \
+         --model claude-opus-4-1-20250805 \
          "What is consciousness?"
-```
-
-### Build a UI with JSON Mode
-```javascript
-import { spawn } from 'child_process';
-
-const agent = spawn('pi-agent', ['--json']);
-
-// Send message
-agent.stdin.write(JSON.stringify({
-  type: 'message',
-  content: 'What is 2+2?'
-}) + '\n');
-
-// Handle events
-agent.stdout.on('data', (data) => {
-  const lines = data.toString().split('\n');
-  for (const line of lines) {
-    if (line.trim()) {
-      const event = JSON.parse(line);
-      console.log('Event:', event.type);
-      // Handle event based on type
-    }
-  }
-});
 ```
 
 ## Session Persistence
@@ -141,16 +140,17 @@ pi-agent --continue "Continue the story"
 
 The agent includes built-in tools for file system operations:
 - **read_file** - Read file contents
-- **list_directory** - List directory contents  
+- **list_directory** - List directory contents
 - **bash** - Execute shell commands
 - **glob** - Find files by pattern
 - **ripgrep** - Search file contents
 
 These tools are automatically available when using the agent through the `pi` command for code navigation tasks.
 
-## Event Types
+## JSON Mode Events
 
 When using `--json`, the agent outputs these event types:
+- `session_start` - New session started with metadata
 - `user_message` - User input
 - `assistant_start` - Assistant begins responding
 - `assistant_message` - Assistant's response
@@ -160,6 +160,146 @@ When using `--json`, the agent outputs these event types:
 - `token_usage` - Token usage statistics
 - `error` - Error occurred
 - `interrupted` - Processing was interrupted
+
+The complete TypeScript type definition for `AgentEvent` can be found in [`src/agent/agent.ts`](agent.ts#L6).
+
+## Build an Interactive UI with JSON Mode
+Build custom UIs in any language by spawning pi-agent in JSON mode and communicating via stdin/stdout.
+
+```javascript
+import { spawn } from 'child_process';
+import { createInterface } from 'readline';
+
+// Start the agent in JSON mode
+const agent = spawn('npx', ['tsx', 'src/agent/cli.ts', '--json']);
+
+// Create readline interface for parsing JSONL output from agent
+const agentOutput = createInterface({input: agent.stdout, crlfDelay: Infinity});
+
+// Create readline interface for user input
+const userInput = createInterface({input: process.stdin, output: process.stdout});
+
+// State tracking
+let isProcessing = false, lastUsage, isExiting = false;
+
+// Handle each line of JSON output from agent
+agentOutput.on('line', (line) => {
+    try {
+      const event = JSON.parse(line);
+
+      // Handle all event types
+      switch (event.type) {
+        case 'session_start':
+          console.log(`Session started (${event.model}, ${event.api}, ${event.baseURL})`);
+          console.log('Press CTRL + C to exit');
+          promptUser();
+          break;
+
+        case 'user_message':
+          // Already shown in prompt, skip
+          break;
+
+        case 'assistant_start':
+          isProcessing = true;
+          console.log('\n[assistant]');
+          break;
+
+        case 'thinking':
+          console.log(`[thinking]\n${event.text}\n`);
+          break;
+
+        case 'tool_call':
+          console.log(`[tool] ${event.name}(${event.args.substring(0, 50)})\n`);
+          break;
+
+        case 'tool_result':
+            const lines = event.result.split('\n');
+            const truncated = lines.length - 5 > 0 ? `\n.  ... (${lines.length - 5} more lines truncated)` : '';
+            console.log(`[tool result]\n${lines.slice(0, 5).join('\n')}${truncated}\n`);
+          break;
+
+        case 'assistant_message':
+          console.log(event.text.trim());
+          isProcessing = false;
+          promptUser();
+          break;
+
+        case 'token_usage':
+          lastUsage = event;
+          break;
+
+        case 'error':
+          console.error('\n❌ Error:', event.message);
+          isProcessing = false;
+          promptUser();
+          break;
+
+        case 'interrupted':
+          console.log('\n⚠️  Interrupted by user');
+          isProcessing = false;
+          promptUser();
+          break;
+      }
+    } catch (e) {
+      console.error('Failed to parse JSON:', line, e);
+    }
+});
+
+// Send a message to the agent
+function sendMessage(content) {
+  agent.stdin.write(`${JSON.stringify({type: 'message', content: content})}\n`);
+}
+
+// Send interrupt signal
+function interrupt() {
+  agent.stdin.write(`${JSON.stringify({type: 'interrupt'})}\n`);
+}
+
+// Prompt for user input
+function promptUser() {
+  if (isExiting) return;
+
+  if (lastUsage) {
+    console.log(`\nin: ${lastUsage.inputTokens}, out: ${lastUsage.outputTokens}, cache read: ${lastUsage.cacheReadTokens}, cache write: ${lastUsage.cacheWriteTokens}`);
+  }
+
+  userInput.question('\n[user]\n> ', (answer) => {
+    answer = answer.trim();
+    if (answer) {
+      sendMessage(answer);
+    } else {
+      promptUser();
+    }
+  });
+}
+
+// Handle Ctrl+C
+process.on('SIGINT', () => {
+  if (isProcessing) {
+    interrupt();
+  } else {
+    agent.kill();
+    process.exit(0);
+  }
+});
+
+// Handle agent exit
+agent.on('close', (code) => {
+  isExiting = true;
+  userInput.close();
+  console.log(`\nAgent exited with code ${code}`);
+  process.exit(code);
+});
+
+// Handle errors
+agent.on('error', (err) => {
+  console.error('Failed to start agent:', err);
+  process.exit(1);
+});
+
+// Start the conversation
+console.log('Pi Agent Interactive Chat');
+```
 
 ## Architecture
 

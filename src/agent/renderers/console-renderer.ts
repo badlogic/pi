@@ -4,6 +4,14 @@ import type { AgentEvent, AgentEventReceiver } from "../../agent/agent.js";
 export class ConsoleRenderer implements AgentEventReceiver {
 	async on(event: AgentEvent): Promise<void> {
 		switch (event.type) {
+			case "session_start":
+				console.log(
+					chalk.blue(
+						`[Session started] ID: ${event.sessionId}, Model: ${event.model}, API: ${event.api}, Base URL: ${event.baseURL}`,
+					),
+				);
+				console.log(chalk.dim(`System Prompt: ${event.systemPrompt}\n`));
+				break;
 			case "assistant_start":
 				console.log(chalk.hex("#FFA500")("[assistant]"));
 				break;

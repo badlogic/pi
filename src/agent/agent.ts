@@ -4,6 +4,7 @@ import type { SessionManager } from "./session-manager.js";
 import { executeTool, toolsForChat, toolsForResponses } from "./tools/tools.js";
 
 export type AgentEvent =
+	| { type: "session_start"; sessionId: string; model: string; api: string; baseURL: string; systemPrompt: string }
 	| { type: "assistant_start" }
 	| { type: "thinking"; text: string }
 	| { type: "tool_call"; toolCallId: string; name: string; args: string }
@@ -305,6 +306,16 @@ export class Agent {
 		// Start session logging if we have a session manager
 		if (sessionManager) {
 			sessionManager.startSession(this.config);
+
+			// Emit session_start event
+			this.comboReceiver.on({
+				type: "session_start",
+				sessionId: sessionManager.getSessionId(),
+				model: config.model,
+				api: config.api,
+				baseURL: config.baseURL,
+				systemPrompt: config.systemPrompt,
+			});
 		}
 	}
 

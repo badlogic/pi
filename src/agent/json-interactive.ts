@@ -44,6 +44,7 @@ export class JsonInteractive {
 			switch (command.type) {
 				case "interrupt":
 					this.agent.interrupt();
+					this.isProcessing = false;
 					break;
 
 				case "message":

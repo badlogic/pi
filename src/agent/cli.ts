@@ -205,7 +205,6 @@ Examples:
 		} else {
 			// Interactive mode with TUI
 			const tui = renderer as InstanceType<typeof TuiRenderer>;
-			await tui.init();
 
 			tui.setInterruptCallback(() => {
 				agent.interrupt();
