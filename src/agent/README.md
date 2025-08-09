@@ -1,10 +1,10 @@
 # pi-agent
 
-A general-purpose agent with tool calling and session persistence, modeled after Claude Code but extremely hackable and minimal. It comes with a built-in TUI (also modeled after Claude Code) for interactive use. 
+A general-purpose agent with tool calling and session persistence, modeled after Claude Code but extremely hackable and minimal. It comes with a built-in TUI (also modeled after Claude Code) for interactive use.
 
 Everything is designed to be easy:
-- Writing custom UIs on top of it (via JSON mode)
-- Using it for inference steps in deterministic programs
+- Writing custom UIs on top of it (via JSON mode in any language or the TypeScript API)
+- Using it for inference steps in deterministic programs (via JSON mode in any language or the TypeScript API)
 - Providing your own system prompts and tools
 - Working with various LLM providers or self-hosted LLMs
 
@@ -18,7 +18,7 @@ This installs both `pi` and `pi-agent` commands.
 
 ## Quick Start
 
-By default, pi-agent uses OpenAI's API with model `gpt-5-mini` and authenticates using the `OPENAI_API_KEY` environment variable. Any OpenAI-compatible endpoint works, including Ollama, vLLM, OpenRouter, Groq, and even Anthropic.
+By default, pi-agent uses OpenAI's API with model `gpt-5-mini` and authenticates using the `OPENAI_API_KEY` environment variable. Any OpenAI-compatible endpoint works, including Ollama, vLLM, OpenRouter, Groq, Anthropic, etc.
 
 ```bash
 # Single message
@@ -71,8 +71,13 @@ pi-agent --json "What is 2+2?"
 
 **Interactive mode:** Accepts JSON commands via stdin and outputs JSON events to stdout.
 ```bash
+# Start interactive JSON mode
 pi-agent --json
 # Now send commands via stdin
+
+# Or pipe multiple messages
+echo '{"type": "message", "content": "What is 2+2?"}
+{"type": "message", "content": "What about 3+3?"}' | pi-agent --json
 ```
 
 Commands you can send via stdin in interactive JSON mode:
