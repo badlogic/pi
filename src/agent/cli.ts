@@ -52,6 +52,114 @@ const argDefs = {
 	},
 };
 
+interface JsonCommand {
+	type: "message" | "interrupt";
+	content?: string;
+}
+
+async function runJsonInteractiveMode(agent: Agent, renderer: AgentEventReceiver): Promise<void> {
+	const rl = createInterface({
+		input: process.stdin,
+		output: process.stdout,
+		terminal: false, // Don't interpret control characters
+	});
+
+	let isProcessing = false;
+	let pendingMessage: string | null = null;
+
+	const processMessage = async (content: string): Promise<void> => {
+		isProcessing = true;
+
+		try {
+			await agent.ask(content);
+		} catch (e: any) {
+			await renderer.on({ type: "error", message: e.message });
+		} finally {
+			isProcessing = false;
+
+			// Process any pending message
+			if (pendingMessage) {
+				const msg = pendingMessage;
+				pendingMessage = null;
+				await processMessage(msg);
+			}
+		}
+	};
+
+	// Listen for lines from stdin
+	rl.on("line", (line) => {
+		try {
+			const command = JSON.parse(line) as JsonCommand;
+
+			switch (command.type) {
+				case "interrupt":
+					agent.interrupt();
+					isProcessing = false;
+					break;
+
+				case "message":
+					if (!command.content) {
+						renderer.on({ type: "error", message: "Message content is required" });
+						return;
+					}
+
+					if (isProcessing) {
+						// Queue the message for when the agent is done
+						pendingMessage = command.content;
+					} else {
+						processMessage(command.content);
+					}
+					break;
+
+				default:
+					renderer.on({ type: "error", message: `Unknown command type: ${(command as any).type}` });
+			}
+		} catch (e) {
+			renderer.on({ type: "error", message: `Invalid JSON: ${e}` });
+		}
+	});
+
+	// Wait for stdin to close
+	await new Promise<void>((resolve) => {
+		rl.on("close", () => {
+			resolve();
+		});
+	});
+}
+
+async function runTuiInteractiveMode(agent: Agent, renderer: any): Promise<void> {
+	const tui = renderer;
+
+	tui.setInterruptCallback(() => {
+		agent.interrupt();
+	});
+
+	while (true) {
+		const userInput = await tui.getUserInput();
+		if (userInput.toLowerCase() === "exit" || userInput.toLowerCase() === "quit") {
+			tui.stop();
+			break;
+		}
+
+		try {
+			await agent.ask(userInput);
+		} catch (e: any) {
+			await renderer.on({ type: "error", message: e.message });
+		}
+	}
+}
+
+async function runSingleShotMode(agent: Agent, renderer: AgentEventReceiver, messages: string[]): Promise<void> {
+	for (const msg of messages) {
+		try {
+			await agent.ask(msg);
+		} catch (e: any) {
+			await renderer.on({ type: "error", message: e.message });
+			// Continue with next message even if one fails
+		}
+	}
+}
+
 // Main function to use Agent as standalone CLI
 export async function main(args: string[]): Promise<void> {
 	// Parse arguments
@@ -197,113 +305,13 @@ Examples:
 
 	// Run in appropriate mode
 	if (isInteractive) {
-		// Interactive mode
 		if (jsonOutput) {
-			// JSON interactive mode - read commands from stdin
-			interface JsonCommand {
-				type: "message" | "interrupt";
-				content?: string;
-			}
-
-			const rl = createInterface({
-				input: process.stdin,
-				output: process.stdout,
-				terminal: false, // Don't interpret control characters
-			});
-
-			let isProcessing = false;
-			let pendingMessage: string | null = null;
-
-			const processMessage = async (content: string): Promise<void> => {
-				isProcessing = true;
-
-				try {
-					await agent.ask(content);
-				} catch (e: any) {
-					await renderer.on({ type: "error", message: e.message });
-				} finally {
-					isProcessing = false;
-
-					// Process any pending message
-					if (pendingMessage) {
-						const msg = pendingMessage;
-						pendingMessage = null;
-						await processMessage(msg);
-					}
-				}
-			};
-
-			// Listen for lines from stdin
-			rl.on("line", (line) => {
-				try {
-					const command = JSON.parse(line) as JsonCommand;
-
-					switch (command.type) {
-						case "interrupt":
-							agent.interrupt();
-							isProcessing = false;
-							break;
-
-						case "message":
-							if (!command.content) {
-								renderer.on({ type: "error", message: "Message content is required" });
-								return;
-							}
-
-							if (isProcessing) {
-								// Queue the message for when the agent is done
-								pendingMessage = command.content;
-							} else {
-								processMessage(command.content);
-							}
-							break;
-
-						default:
-							renderer.on({ type: "error", message: `Unknown command type: ${(command as any).type}` });
-					}
-				} catch (e) {
-					renderer.on({ type: "error", message: `Invalid JSON: ${e}` });
-				}
-			});
-
-			// Wait for stdin to close
-			await new Promise<void>((resolve) => {
-				rl.on("close", () => {
-					resolve();
-				});
-			});
+			await runJsonInteractiveMode(agent, renderer);
 		} else {
-			// Interactive mode with TUI
-			const tui = renderer as InstanceType<typeof TuiRenderer>;
-
-			tui.setInterruptCallback(() => {
-				agent.interrupt();
-			});
-
-			while (true) {
-				const userInput = await tui.getUserInput();
-				if (userInput.toLowerCase() === "exit" || userInput.toLowerCase() === "quit") {
-					tui.stop();
-					break;
-				}
-
-				try {
-					await agent.ask(userInput);
-				} catch (e: any) {
-					await renderer.on({ type: "error", message: e.message });
-				}
-			}
+			await runTuiInteractiveMode(agent, renderer);
 		}
 	} else {
-		// Single-shot mode: process all messages sequentially
-		for (const msg of messages) {
-			try {
-				await agent.ask(msg);
-			} catch (e: any) {
-				await renderer.on({ type: "error", message: e.message });
-				// Continue with next message even if one fails
-			}
-		}
+		await runSingleShotMode(agent, renderer, messages);
 	}
 }
 

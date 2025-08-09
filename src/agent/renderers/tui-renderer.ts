@@ -72,11 +72,7 @@ export class TuiRenderer implements AgentEventReceiver {
 
 		// Setup autocomplete for file paths and slash commands
 		const autocompleteProvider = new CombinedAutocompleteProvider(
-			[
-				{ name: "clear", description: "Clear chat history" },
-				{ name: "exit", description: "Exit the chat" },
-				{ name: "help", description: "Show available commands" },
-			],
+			[],
 			process.cwd(), // Base directory for file path completion
 		);
 		this.editor.setAutocompleteProvider(autocompleteProvider);
