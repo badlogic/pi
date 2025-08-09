@@ -273,7 +273,7 @@ export async function callModelChatCompletionsApi(
 
 export class Agent {
 	private client: OpenAI;
-	private config: AgentConfig;
+	public readonly config: AgentConfig;
 	private messages: any[] = [];
 	private renderer?: AgentEventReceiver;
 	private sessionManager?: SessionManager;

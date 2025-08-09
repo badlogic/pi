@@ -9,14 +9,13 @@ import { getActivePod, loadConfig } from "../config.js";
 interface PromptOptions {
 	pod?: string;
 	apiKey?: string;
-	continue?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Main prompt function
 // ────────────────────────────────────────────────────────────────────────────────
 
-export async function promptModel(modelName: string, userMessages: string[] | undefined, opts: PromptOptions = {}) {
+export async function promptModel(modelName: string, userArgs: string[], opts: PromptOptions = {}) {
 	// Get pod and model configuration
 	const activePod = opts.pod ? { name: opts.pod, pod: loadConfig().pods[opts.pod] } : getActivePod();
 
@@ -56,7 +55,10 @@ File paths you output must include line numbers where possible, e.g. "src/index.
 Current working directory: ${process.cwd()}`;
 
 	// Build arguments for agent main function
-	const args = [
+	const args: string[] = [];
+
+	// Add base configuration that we control
+	args.push(
 		"--base-url",
 		`http://${host}:${modelConfig.port}/v1`,
 		"--model",
@@ -67,16 +69,11 @@ Current working directory: ${process.cwd()}`;
 		modelConfig.model.toLowerCase().includes("gpt-oss") ? "responses" : "completions",
 		"--system-prompt",
 		systemPrompt,
-	];
+	);
 
-	if (opts.continue) {
-		args.push("--continue");
-	}
-
-	// Add messages (if provided, it's single-shot mode; if not, it's interactive)
-	if (userMessages && userMessages.length > 0) {
-		args.push(...userMessages);
-	}
+	// Pass through all user-provided arguments
+	// This includes messages, --continue, --json, etc.
+	args.push(...userArgs);
 
 	// Call agent main function directly
 	try {

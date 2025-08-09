@@ -59,6 +59,8 @@ pi-agent
 - Type messages and press Enter to send
 - Type `exit` or `quit` to end session
 - Press Escape to interrupt while processing
+- Press CTRL+C to clear the text editor
+- Press CTRL+C twice quickly to exit
 
 ### JSON Mode
 JSON mode enables programmatic integration by outputting events as JSONL (JSON Lines).

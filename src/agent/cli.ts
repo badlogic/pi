@@ -1,8 +1,13 @@
 #!/usr/bin/env node
+import chalk from "chalk";
 import { createInterface } from "readline";
-import type { AgentEventReceiver } from "./agent.js";
+import type { AgentConfig, AgentEventReceiver } from "./agent.js";
 import { Agent } from "./agent.js";
-import { parseArgs, printHelp } from "./args.js";
+import { parseArgs, printHelp as printHelpArgs } from "./args.js";
+import { ConsoleRenderer } from "./renderers/console-renderer.js";
+import { JsonRenderer } from "./renderers/json-renderer.js";
+import { TuiRenderer } from "./renderers/tui-renderer.js";
+import { SessionManager } from "./session-manager.js";
 
 // Define argument structure
 const argDefs = {
@@ -57,13 +62,42 @@ interface JsonCommand {
 	content?: string;
 }
 
-async function runJsonInteractiveMode(agent: Agent, renderer: AgentEventReceiver): Promise<void> {
+function printHelp(): void {
+	const usage = `Usage: pi-agent [options] [messages...]
+
+Examples:
+# Single message (default OpenAI, GPT-5 Mini, OPENAI_API_KEY env var)
+pi-agent "What is 2+2?"
+
+# Multiple messages processed sequentially
+pi-agent "What is 2+2?" "What about 3+3?"
+
+# Interactive chat mode (no messages = interactive)
+pi-agent
+
+# Continue most recently modified session in current directory
+pi-agent --continue "Follow up question"
+
+# GPT-OSS via Groq
+pi-agent --base-url https://api.groq.com/openai/v1 --api-key $GROQ_API_KEY --model openai/gpt-oss-120b
+
+# GLM 4.5 via OpenRouter
+pi-agent --base-url https://openrouter.ai/api/v1 --api-key $OPENROUTER_API_KEY --model z-ai/glm-4.5
+
+# Claude via Anthropic (no prompt caching support - see https://docs.anthropic.com/en/api/openai-sdk)
+pi-agent --base-url https://api.anthropic.com/v1 --api-key $ANTHROPIC_API_KEY --model claude-opus-4-1-20250805`;
+	printHelpArgs(argDefs, usage);
+}
+
+async function runJsonInteractiveMode(config: AgentConfig, sessionManager: SessionManager): Promise<void> {
 	const rl = createInterface({
 		input: process.stdin,
 		output: process.stdout,
 		terminal: false, // Don't interpret control characters
 	});
 
+	const renderer = new JsonRenderer();
+	const agent = new Agent(config, renderer, sessionManager);
 	let isProcessing = false;
 	let pendingMessage: string | null = null;
 
@@ -127,20 +161,31 @@ async function runJsonInteractiveMode(agent: Agent, renderer: AgentEventReceiver
 	});
 }
 
-async function runTuiInteractiveMode(agent: Agent, renderer: any): Promise<void> {
-	const tui = renderer;
-
-	tui.setInterruptCallback(() => {
+async function runTuiInteractiveMode(agentConfig: AgentConfig, sessionManager: SessionManager): Promise<void> {
+	const sessionData = sessionManager.getSessionData();
+	if (sessionData) {
+		console.log(chalk.dim(`Resuming session with ${sessionData.events.length} events`));
+	}
+	const renderer = new TuiRenderer();
+	const agent = new Agent(agentConfig, renderer, sessionManager);
+	renderer.setInterruptCallback(() => {
 		agent.interrupt();
 	});
+	if (sessionData) {
+		agent.setEvents(sessionData ? sessionData.events.map((e) => e.event) : []);
+		await renderer.init();
+		for (const sessionEvent of sessionData.events) {
+			const event = sessionEvent.event;
+			if (event.type === "assistant_start") {
+				renderer.renderAssistantLabel();
+			} else {
+				await renderer.on(event);
+			}
+		}
+	}
 
 	while (true) {
-		const userInput = await tui.getUserInput();
-		if (userInput.toLowerCase() === "exit" || userInput.toLowerCase() === "quit") {
-			tui.stop();
-			break;
-		}
-
+		const userInput = await renderer.getUserInput();
 		try {
 			await agent.ask(userInput);
 		} catch (e: any) {
@@ -149,13 +194,24 @@ async function runTuiInteractiveMode(agent: Agent, renderer: any): Promise<void>
 	}
 }
 
-async function runSingleShotMode(agent: Agent, renderer: AgentEventReceiver, messages: string[]): Promise<void> {
+async function runSingleShotMode(
+	agentConfig: AgentConfig,
+	sessionManager: SessionManager,
+	messages: string[],
+): Promise<void> {
+	const sessionData = sessionManager.getSessionData();
+	const renderer = new ConsoleRenderer();
+	const agent = new Agent(agentConfig, renderer);
+	if (sessionData) {
+		console.log(chalk.dim(`Resuming session with ${sessionData.events.length} events`));
+		agent.setEvents(sessionData ? sessionData.events.map((e) => e.event) : []);
+	}
+
 	for (const msg of messages) {
 		try {
 			await agent.ask(msg);
 		} catch (e: any) {
 			await renderer.on({ type: "error", message: e.message });
-			// Continue with next message even if one fails
 		}
 	}
 }
@@ -167,31 +223,7 @@ export async function main(args: string[]): Promise<void> {
 
 	// Show help if requested
 	if (parsed.help) {
-		const usage = `Usage: pi-agent [options] [messages...]
-
-Examples:
-  # Single message
-  pi-agent --api-key sk-... "What is 2+2?"
-
-  # Multiple messages (processed sequentially)
-  pi-agent "What is 2+2?" "What about 3+3?"
-
-  # JSON output
-  pi-agent --json "What is 2+2?"
-
-  # Interactive mode (no messages = interactive)
-  pi-agent --api-key sk-...
-
-  # Interactive JSON mode (for programmatic UIs)
-  pi-agent --json
-
-  # Continue previous session
-  pi-agent --continue "Follow up question"
-
-  # Use local vLLM
-  pi-agent --base-url http://localhost:8000/v1 --model meta-llama/Llama-3.1-8B-Instruct "Hello"`;
-
-		printHelp(argDefs, usage);
+		printHelp();
 		return;
 	}
 
@@ -209,109 +241,40 @@ Examples:
 		throw new Error("API key required (use --api-key or set OPENAI_API_KEY)");
 	}
 
-	// Import dependencies
-	const { ConsoleRenderer } = await import("./renderers/console-renderer.js");
-	const { SessionManager } = await import("./session-manager.js");
-	const { TuiRenderer } = await import("./renderers/tui-renderer.js");
-	const { JsonRenderer } = await import("./renderers/json-renderer.js");
-
 	// Determine mode: interactive if no messages provided
 	const isInteractive = messages.length === 0;
-
-	// Create renderer based on mode and json flag
-	let renderer: AgentEventReceiver;
-	if (jsonOutput) {
-		renderer = new JsonRenderer();
-	} else if (isInteractive) {
-		renderer = new TuiRenderer();
-	} else {
-		renderer = new ConsoleRenderer();
-	}
-
-	// Show configuration in interactive TUI mode only
-	if (isInteractive && !jsonOutput) {
-		console.log(`Using: ${baseURL} with model ${model}`);
-		if (!apiKey || apiKey === "dummy") {
-			console.log("Warning: No valid API key provided. Set OPENAI_API_KEY or use --api-key");
-		}
-	}
 
 	// Create session manager
 	const sessionManager = new SessionManager(continueSession);
 
 	// Create or restore agent
-	let agent: Agent;
+	let agentConfig: AgentConfig = {
+		apiKey,
+		baseURL,
+		model,
+		api,
+		systemPrompt,
+	};
 
 	if (continueSession) {
 		const sessionData = sessionManager.getSessionData();
 		if (sessionData) {
-			// Resume with existing config
-			if (!jsonOutput) {
-				console.log(`Resuming session with ${sessionData.events.length} events`);
-			}
-			agent = new Agent(
-				{
-					...sessionData.config,
-					apiKey, // Allow overriding API key
-				},
-				renderer,
-				sessionManager,
-			);
-			// Restore events
-			const agentEvents = sessionData.events.map((e) => e.event);
-			agent.setEvents(agentEvents);
-
-			// Replay events to renderer for visual continuity
-			if (isInteractive && renderer instanceof TuiRenderer) {
-				await renderer.init();
-				for (const sessionEvent of sessionData.events) {
-					const event = sessionEvent.event;
-					if (event.type === "assistant_start") {
-						renderer.renderAssistantLabel();
-					} else {
-						await renderer.on(event);
-					}
-				}
-			}
-		} else {
-			if (!jsonOutput) {
-				console.log("No previous session found, starting new session");
-			}
-			agent = new Agent(
-				{
-					apiKey,
-					baseURL,
-					model,
-					api,
-					systemPrompt: "You are a helpful assistant.",
-				},
-				renderer,
-				sessionManager,
-			);
+			agentConfig = {
+				...sessionData.config,
+				apiKey, // Allow overriding API key
+			};
 		}
-	} else {
-		agent = new Agent(
-			{
-				apiKey,
-				baseURL,
-				model,
-				api,
-				systemPrompt,
-			},
-			renderer,
-			sessionManager,
-		);
 	}
 
 	// Run in appropriate mode
 	if (isInteractive) {
 		if (jsonOutput) {
-			await runJsonInteractiveMode(agent, renderer);
+			await runJsonInteractiveMode(agentConfig, sessionManager);
 		} else {
-			await runTuiInteractiveMode(agent, renderer);
+			await runTuiInteractiveMode(agentConfig, sessionManager);
 		}
 	} else {
-		await runSingleShotMode(agent, renderer, messages);
+		await runSingleShotMode(agentConfig, sessionManager, messages);
 	}
 }
 

@@ -85,7 +85,11 @@ export class TuiRenderer implements AgentEventReceiver {
 		const header = new TextComponent(
 			chalk.gray(chalk.blueBright(">> pi interactive chat <<<")) +
 				"\n" +
-				chalk.dim("Press Escape to interrupt while processing"),
+				chalk.dim("Press Escape to interrupt while processing") +
+				"\n" +
+				chalk.dim("Press CTRL+C to clear the text editor") +
+				"\n" +
+				chalk.dim("Press CTRL+C twice quickly to exit"),
 			{ bottom: 1 },
 		);
 
